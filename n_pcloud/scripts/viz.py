@@ -127,7 +127,10 @@ def main():
         f = frame.read(args.scene, ply, js, at)
         cand = features.candidates(f)
 
-        label, lo = occ.classify(f.points, res=head["res"])
+        handle = occ.near_grasps(f.points, f.pos, res=head["res"])
+        keep = ~occ.flying_pixels(f.points) | handle
+        label, lo = occ.classify(f.points, res=head["res"], keep=keep,
+                                 trusted=handle)
         label, carved = occ.carve_target(label, lo, head["res"], f.pos)
         idx, inside = occ.world_to_index(f.points, lo, head["res"], label.shape)
         is_target = np.zeros(len(f.points), dtype=bool)

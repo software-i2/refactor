@@ -63,6 +63,8 @@ def main():
                     help="generous screen on how far the arm can get; n_check owns the verdict")
     ap.add_argument("--floor-z", type=float, default=0.0, dest="floor_z",
                     help="screen out candidates below this; n_check owns the verdict")
+    ap.add_argument("--raw", action="store_true",
+                    help="skip all noise filtering, for comparison")
     ap.add_argument("--out", help="write the field here")
     ap.add_argument("--candidates", help="write the flat candidate list here, one per line")
     ap.add_argument("--check", help="report whether this field still matches these inputs")
@@ -71,7 +73,10 @@ def main():
     ply_path, json_path = scene_paths(args)
     name = args.scene or os.path.basename(ply_path)
     links = field.links_for(args.res)
-    stamp = digest(ply_path, json_path, args.res, args.step, args.at, links)
+    filt = () if args.raw else (occ.SUPPORT_TOL, occ.SUPPORT_MIN,
+                                occ.SUPPORT_WINDOW, occ.CARVE_MIN_HITS,
+                                occ.HANDLE_RADIUS)
+    stamp = digest(ply_path, json_path, args.res, args.step, args.at, links, filt)
 
     if args.check:
         head = read_header(args.check)
@@ -93,7 +98,18 @@ def main():
     print("  %d points, %d poses, camera at %s in arm_base"
           % (len(f.points), len(f.pos), np.round(f.at, 3)))
 
-    label, lo = occ.classify(f.points, res=args.res)
+    keep, handle, min_hits = None, None, 1
+    if not args.raw:
+        handle = occ.near_grasps(f.points, f.pos, res=args.res)
+        keep = ~occ.flying_pixels(f.points) | handle
+        min_hits = occ.CARVE_MIN_HITS
+        dropped = len(f.points) - int(keep.sum())
+        print("  filter dropped %d of %d returns (%.2f%%), %d spared as handle"
+              % (dropped, len(f.points), 100.0 * dropped / len(f.points),
+                 int(handle.sum())))
+
+    label, lo = occ.classify(f.points, res=args.res, keep=keep, trusted=handle,
+                             min_hits=min_hits)
     label, carved = occ.carve_target(label, lo, args.res, f.pos)
     counts = dict((occ.NAME[v], int((label == v).sum())) for v in occ.NAME)
     print("  grid %s at %.0f mm: %s"

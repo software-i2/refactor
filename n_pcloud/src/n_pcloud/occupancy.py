@@ -16,7 +16,6 @@ from __future__ import print_function
 
 import numpy as np
 from scipy import ndimage
-from scipy.spatial import cKDTree
 
 UNKNOWN = 0   # never on a ray, or beyond what was measured
 FREE = 1      # looked through
@@ -36,7 +35,8 @@ SUPPORT_TOL = 0.004      # m, how far a neighbour may sit off the local surface
 SUPPORT_MIN = 2          # neighbours, of the eight, that must agree
 SUPPORT_WINDOW = 5       # px, window the local tilt is fitted over
 CARVE_MIN_HITS = 2       # returns needed to call a carved-free voxel occupied
-HANDLE_RADIUS = 0.005    # m, returns this close to a grasp are never dropped
+HANDLE_RADIUS = 0.005    # m, the handle around a grasp, exempt from the filter
+PAD = 0.02               # m, margin the grid keeps around the cloud
 
 
 def _axis_lattice(a, min_gap=1e-5):
@@ -76,6 +76,86 @@ def _depth_image(xyz, intr):
     return img
 
 
+def _shift(img, dy, dx):
+    out = np.full(img.shape, np.inf)
+    h, w = img.shape
+    ys, ye = max(0, dy), min(h, h + dy)
+    xs, xe = max(0, dx), min(w, w + dx)
+    out[ys:ye, xs:xe] = img[ys - dy:ye - dy, xs - dx:xe - dx]
+    return out
+
+
+def _window_mean(a, valid, window):
+    weight = ndimage.uniform_filter(valid.astype(np.float64), window)
+    total = ndimage.uniform_filter(np.where(valid, a, 0.0), window)
+    return total / np.maximum(weight, 1e-9)
+
+
+def _local_tilt(img, valid, window):
+    """Depth gradient per pixel, least squares over the window."""
+    u = np.arange(img.shape[1], dtype=np.float64)[None, :]
+    v = np.arange(img.shape[0], dtype=np.float64)[:, None]
+    mean_z = _window_mean(img, valid, window)
+    spread = (window * window - 1) / 12.0
+    return ((_window_mean(img * u, valid, window) - u * mean_z) / spread,
+            (_window_mean(img * v, valid, window) - v * mean_z) / spread)
+
+
+def flying_pixels(xyz, tol=SUPPORT_TOL, need=SUPPORT_MIN, window=SUPPORT_WINDOW):
+    """Returns that no neighbour supports, as a mask over xyz.
+
+    A stereo match straddling an occlusion edge lands between the near surface
+    and the far one and belongs to neither, which is what this asks. The
+    comparison runs against the local tilt rather than the raw depth, so a steep
+    surface is not mistaken for a straddle.
+    """
+    intr = _intrinsics(xyz)
+    img = _depth_image(xyz, intr)
+    valid = np.isfinite(img)
+    dzdx, dzdy = _local_tilt(img, valid, window)
+
+    agree = np.zeros(img.shape, dtype=np.int16)
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dx or dy:
+                off = _shift(img, dy, dx) - img - dzdx * dx - dzdy * dy
+                agree += (np.abs(off) <= tol)
+
+    px, py, on = _pixel_of(xyz, intr)
+    drop = np.zeros(len(xyz), dtype=bool)
+    drop[on] = ~(valid & (agree >= need))[py[on], px[on]]
+    return drop
+
+
+def near_grasps(xyz, grasps, res=0.005, pad=PAD, radius=HANDLE_RADIUS):
+    """Returns landing in a voxel carve_target will call TARGET.
+
+    They are exempt from the filter: a handle is thin and obliquely seen, which
+    is the one case a straddle and a real surface look alike. Keeping them costs
+    the jaw nothing, since field.py dilates its plane from a grid with TARGET
+    taken out. Sharing _grasp_voxels with carve_target is what stops the exempt
+    set and the carved set from drifting apart.
+    """
+    grasps = np.asarray(grasps, dtype=float)
+    out = np.zeros(len(xyz), dtype=bool)
+    if not len(grasps):
+        return out
+
+    lo, dims = grid_bounds(xyz, res, pad)
+    near = _grasp_voxels(grasps, lo, res, dims, radius)
+    idx, inside = world_to_index(xyz, lo, res, dims)
+    idx = idx[inside]
+    out[inside] = near[idx[:, 0], idx[:, 1], idx[:, 2]]
+    return out
+
+
+def grid_bounds(xyz, res, pad=PAD):
+    """Origin and shape of the voxel grid holding the cloud."""
+    lo = xyz.min(0) - pad
+    dims = np.maximum(np.ceil((xyz.max(0) + pad - lo) / res).astype(int), 1)
+    return lo, dims
+
+
 def world_to_index(points, lo, res, dims):
     idx = np.floor((np.asarray(points, dtype=float) - lo) / res).astype(np.int64)
     inside = np.ones(len(idx), dtype=bool)
@@ -92,13 +172,23 @@ def sphere_offsets(radius, res):
     return np.stack([dx[keep], dy[keep], dz[keep]], axis=1)
 
 
-def classify(xyz, res=0.005, pad=0.02, tol=None, chunk=32):
+def classify(xyz, res=0.005, pad=PAD, tol=None, chunk=32, keep=None,
+             trusted=None, min_hits=CARVE_MIN_HITS):
     """Label every voxel FREE, OBSTACLE or UNKNOWN. Chunked over the first axis
-    because the whole grid of ray lookups at once costs gigabytes."""
+    because the whole grid of ray lookups at once costs gigabytes.
+
+    `keep` selects which returns may mark a voxel occupied; the depth image is
+    built from all of them either way, so filtering never costs free space. A
+    voxel the rays looked through needs min_hits returns to be called back --
+    one straggler does not outvote the carve.
+
+    `trusted` returns stand on their own. Rays passing either side of a thin
+    thing carve it free, so a handle one return wide loses the vote it should
+    win, and that vote is the whole reason to name an exception.
+    """
     intr = _intrinsics(xyz)
     img = _depth_image(xyz, intr)
-    lo = xyz.min(0) - pad
-    dims = np.maximum(np.ceil((xyz.max(0) + pad - lo) / res).astype(int), 1)
+    lo, dims = grid_bounds(xyz, res, pad)
     tol = res if tol is None else tol
 
     state = np.full(tuple(dims), UNKNOWN, dtype=np.uint8)
@@ -127,21 +217,22 @@ def classify(xyz, res=0.005, pad=0.02, tol=None, chunk=32):
         block[seen & np.isfinite(measured) & (depth < measured - tol)] = FREE
         state[i0:i1] = block
 
-    hit, inside = world_to_index(xyz, lo, res, dims)
-    hit = hit[inside]
-    state[hit[:, 0], hit[:, 1], hit[:, 2]] = OBSTACLE
+    idx, inside = world_to_index(xyz, lo, res, dims)
+
+    def stamped(mask):
+        take = inside if mask is None else (inside & np.asarray(mask, dtype=bool))
+        grid = np.zeros(tuple(dims), dtype=np.int32)
+        np.add.at(grid, tuple(idx[take].T), 1)
+        return grid
+
+    hits = stamped(keep)
+    sure = np.zeros(tuple(dims), dtype=bool) if trusted is None else stamped(trusted) > 0
+    state[(hits >= min_hits) | ((hits > 0) & (state != FREE)) | sure] = OBSTACLE
     return state, lo
 
 
-def carve_target(state, lo, res, grasps, radius=0.005, max_radius=0.015):
-    label = state.copy()
-    dims = np.array(state.shape)
-    radius = min(float(radius), float(max_radius))
-
-    grasps = np.asarray(grasps, dtype=float)
-    if not len(grasps):
-        return label, 0
-
+def _grasp_voxels(grasps, lo, res, dims, radius):
+    """The voxels a grasp sphere covers."""
     gidx, ginside = world_to_index(grasps, lo, res, dims)
     gidx = gidx[ginside]
 
@@ -154,7 +245,19 @@ def carve_target(state, lo, res, grasps, radius=0.005, max_radius=0.015):
 
     near = np.zeros(tuple(dims), dtype=bool)
     near[hit[:, 0], hit[:, 1], hit[:, 2]] = True
+    return near
 
+
+def carve_target(state, lo, res, grasps, radius=HANDLE_RADIUS, max_radius=0.015):
+    label = state.copy()
+    dims = np.array(state.shape)
+    radius = min(float(radius), float(max_radius))
+
+    grasps = np.asarray(grasps, dtype=float)
+    if not len(grasps):
+        return label, 0
+
+    near = _grasp_voxels(grasps, lo, res, dims, radius)
     is_target = near & (label == OBSTACLE)
     label[is_target] = TARGET
     return label, int(is_target.sum())

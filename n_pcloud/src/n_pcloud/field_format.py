@@ -32,7 +32,7 @@ MAGIC = b"BXFIELD4"
 _HEADER_BYTES = 8 + 24 + 24 + 12 + 4 + 8 + 24 + 24
 
 
-def digest(ply_path, json_path, res, delta, xyz, links):
+def digest(ply_path, json_path, res, delta, xyz, links, filt=()):
     """Identifies the inputs a field was built from, so a stale one is spotted
     rather than loaded silently against the wrong world."""
     h = hashlib.sha256()
@@ -40,7 +40,7 @@ def digest(ply_path, json_path, res, delta, xyz, links):
         with open(path, "rb") as fh:
             for chunk in iter(lambda: fh.read(1 << 20), b""):
                 h.update(chunk)
-    for value in (res, delta):
+    for value in (res, delta) + tuple(filt):
         h.update(np.float64(value).tobytes())
     h.update(np.asarray(xyz, dtype="<f8").tobytes())
     for name, radius in links:
