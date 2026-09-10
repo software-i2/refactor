@@ -261,3 +261,5 @@ Status admit(const kine::Geom &g,
 
     return Status::OK;
 }
+
+}
