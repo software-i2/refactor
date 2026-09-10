@@ -109,6 +109,10 @@ void Node::onStates(const sensor_msgs::JointState::ConstPtr &msg) {
 void Node::onCtrlState(const Msg_UInt8::ConstPtr &msg) {
     ctrl_state_ = static_cast<ctrl::State>(msg->data);
     ctrl_seen_  = true;
+    ctrl_at_    = reach::nowSec();
+    if (ctrl_state_ == ctrl::State::APPROACHING || ctrl_state_ == ctrl::State::SETTLING) {
+        ctrl_busy_ = true;
+    }
 }
 
 bool Node::snapshot(kine::Joints &q) {
@@ -121,8 +125,9 @@ void Node::enter(Step s) {
     if (step_ == s) {
         return;
     }
-    step_        = s;
-    leg_began_s_ = reach::nowSec();
+    step_      = s;
+    leg_at_    = reach::nowSec();
+    ctrl_busy_ = false;
     LOG_INFO("[task] %s", name(s));
 }
 
@@ -318,15 +323,29 @@ void Node::tick() {
         return;
     }
 
-    if (reach::nowSec() - leg_began_s_ > p_.leg_timeout_s) {
-        LOG_ERROR("[task] the leg did not finish in %.0f s; giving up on it", p_.leg_timeout_s);
+    const double now = reach::nowSec();
+
+    if (now - ctrl_at_ > p_.ctrl_silence_s) {
+        LOG_ERROR("[task] n_ctrl has not reported for %.1f s; giving up on the leg",
+                  p_.ctrl_silence_s);
         enter(Step::FAILED);
+        return;
+    }
+
+    // ctrl/state is only published from n_ctrl's tick, so until it says it is
+    // moving, what it reports still describes the leg before this one.
+    if (!ctrl_busy_) {
+        if (now - leg_at_ > p_.ctrl_silence_s) {
+            LOG_ERROR("[task] n_ctrl never took the leg; it still reports %s",
+                      ctrl::name(ctrl_state_));
+            enter(Step::FAILED);
+        }
         return;
     }
 
     // n_ctrl owns whether a leg finished; this only reacts to what it reports.
     if (ctrl_state_ == ctrl::State::STALLED || ctrl_state_ == ctrl::State::PILLOW
-        || ctrl_state_ == ctrl::State::ABORTED) {
+        || ctrl_state_ == ctrl::State::ABORTED || ctrl_state_ == ctrl::State::IDLE) {
         LOG_ERROR("[task] the arm stopped mid-leg (%s), so the pick is off. The outbound path is "
                   "kept: task/home will back out.", ctrl::name(ctrl_state_));
         enter(Step::FAILED);

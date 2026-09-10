@@ -112,5 +112,6 @@ task:
   # Run the whole pick unattended, or stop after each leg for the operator.
   auto_sequence: false
 
-  # A leg that has not finished by now has gone wrong; give up on it.
-  leg_timeout_s: 150.0
+  # n_ctrl says when a leg ends, so this only covers n_ctrl itself going away:
+  # how long it may stay quiet, and how long it may take to pick up a leg.
+  ctrl_silence_s: 1.0

@@ -15,13 +15,13 @@ struct Params {
 
     double rate_hz = kine::NONE;
     bool auto_sequence = false;
-    double leg_timeout_s = kine::NONE;
+    double ctrl_silence_s = kine::NONE;
 
     void load(conf::Doc &doc) {
         ask.load(doc);
-        rate_hz       = doc.num("task.rate_hz");
-        auto_sequence = doc.flag("task.auto_sequence");
-        leg_timeout_s = doc.num("task.leg_timeout_s");
+        rate_hz        = doc.num("task.rate_hz");
+        auto_sequence  = doc.flag("task.auto_sequence");
+        ctrl_silence_s = doc.num("task.ctrl_silence_s");
     }
 
     const char *missing() const {
@@ -32,7 +32,7 @@ struct Params {
         if (!std::isfinite(rate_hz)) {
             return "task.rate_hz";
         }
-        return std::isfinite(leg_timeout_s) ? NULL : "task.leg_timeout_s";
+        return std::isfinite(ctrl_silence_s) ? NULL : "task.ctrl_silence_s";
     }
 };
 

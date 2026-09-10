@@ -108,11 +108,13 @@ private:
     Choice                 last_;
     std::vector<Candidate> candidates_;
 
-    Step   step_       = Step::IDLE;
-    double leg_began_s_ = 0.0;
+    Step   step_   = Step::IDLE;
+    double leg_at_ = 0.0;
 
     ctrl::State ctrl_state_ = ctrl::State::IDLE;
     bool        ctrl_seen_  = false;
+    double      ctrl_at_    = 0.0;
+    bool        ctrl_busy_  = false;
 };
 
 }  // namespace task
