@@ -146,7 +146,7 @@ bool Arm::ping(int tries) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
 
-            // A velocity nudge wakes the joint without moving it anywhere.
+            // Wake the joint with a tiny velocity nudge.
             send(DEVICE[WRIST], Pkt::VELOCITY, encodeFloat(0.01f));
 
             Packet pkt;

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(n_check)
 
-# Pure geometry: catkin only packages it, nothing here links ROS.
+# Geometry-only package; no ROS runtime linkage.
 find_package(catkin REQUIRED COMPONENTS n_kine n_conf)
 
 catkin_package(INCLUDE_DIRS include
@@ -21,7 +21,7 @@ add_library(n_check
             src/Scene.cpp)
 target_link_libraries(n_check ${catkin_LIBRARIES})
 
-# Also runs outside Docker; pass a field file to exercise the loader.
+# Field-check binary; pass a field file to exercise the loader.
 add_executable(n_check_check test/check.cpp)
 target_link_libraries(n_check_check n_check ${catkin_LIBRARIES})
 

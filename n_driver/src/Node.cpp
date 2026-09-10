@@ -39,7 +39,7 @@ void Node::tick() {
         }
     }
 
-    // One joint's mode per tick, and its climate when the period is up.
+    // Update one joint mode per tick and refresh climate when the interval expires.
     const uint32_t slot = ticks_++ % N_JOINTS;
     mode_[slot]         = static_cast<uint8_t>(arm_->mode(slot));
 

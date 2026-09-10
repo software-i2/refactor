@@ -1,7 +1,6 @@
 # Copyright by BeeX [2026]
 #
-# EVERY TUNABLE IN THE ARM STACK.
-# Lengths are metres, angles degrees, times seconds.
+# Lengths are metres, angles are degrees, and times are seconds.
 
 world:
   floor_z_m: -1.0e-6
@@ -9,7 +8,6 @@ world:
 
 
 arm:
-  # Link transforms in the arm plane, from alpha_description/xacro/alpha.urdf.xacro.
   base_to_e_z: 0.0140       # base -> axis_e
   e_to_d_x: -0.02           # axis_e -> axis_d
   e_to_d_z: 0.0330
@@ -22,18 +20,14 @@ arm:
   mount_to_throat: 0.0400   # mount -> throat
   mount_to_tip: 0.0969      # mount -> jaw tips
 
-  # Jaw hinge roll when the wrist reads zero.
   hinge_offset_deg: -60.0
 
-  # Kinematic limits, per joint.
   limit_lo_deg: {base: -2.403, shoulder: 0.0, elbow: 0.0, wrist: -184.5}
   limit_hi_deg: {base: 349.5, shoulder: 200.0, elbow: 184.5, wrist: 0.0}
 
-  # q_kin = sign * (wire - zero_offset) 
   zero_offset_deg: {base: 2.403, shoulder: 0.0, elbow: 0.0, wrist: 0.0}
   direction_sign: {base: 1.0, shoulder: 1.0, elbow: 1.0, wrist: -1.0}
 
-  # Cost of moving each joint, for choosing between IK branches.
   weight: {base: 10.0, shoulder: 1.0, elbow: 1.0, wrist: 1.0}
 
 jaws:
@@ -45,8 +39,6 @@ jaws:
   blade_origin: [0.0, -0.008, 0.045]
   open_mm: 8.0
 
-  # Blade that must still lie beyond the grasp point. Without it the search
-  # "solves" every hold by grasping at the fingertips, holding nothing.
   grip_margin_m: 0.020
 
 driver:
@@ -54,11 +46,11 @@ driver:
   baud: 115200
   rate_hz: 10.0
 
-  climate_period_s: 15.0    # one joint's climate per period, round robin
-  log_period_s: 20.0        # console cadence; a mode change always prints
+  climate_period_s: 15.0    # one joint's climate per round-robin period
+  log_period_s: 20.0        # console cadence; mode changes always print
   jog_timeout_s: 0.5        # a jog not re-sent within this is zeroed
 
-  reply_timeout_s: 0.05     # how long to wait for a position or mode answer
+  reply_timeout_s: 0.05     # wait time for a motion-status answer
   climate_timeout_s: 0.1
   climate_max_miss: 3       # give up on a climate field after this many silences
 
@@ -80,8 +72,6 @@ ctrl:
 
   goal_tolerance_deg: 1.5
 
-  # joint_states older than this cannot say whether the arm is following, so
-  # pillow detection is suspended rather than tripping on stale numbers.
   feedback_timeout_s: 0.5
   arrival_timeout_s: 15.0   # then release to standby and report STALLED
 
@@ -93,25 +83,13 @@ ctrl:
 task:
   rate_hz: 5.0
 
-  # How far back along the approach the pre-grasp sits.
   standoff_m: 0.08
-
-  # Largest angle the arm's own approach may sit from the one asked for.
   max_approach_dev_deg: 20.0
 
-  # Where along the claw to take hold. Searched deepest first, because the gap
-  # between the blades widens down the claw.
   depth_min_m: 0.040
   depth_max_m: 0.065
   depth_step_m: 0.005
 
-  # Samples along the straight run from standoff to hold, when judging whether
-  # that run is clear.
   leg_samples: 8
-
-  # Run the whole pick unattended, or stop after each leg for the operator.
   auto_sequence: false
-
-  # n_ctrl says when a leg ends, so this only covers n_ctrl itself going away:
-  # how long it may stay quiet, and how long it may take to pick up a leg.
   ctrl_silence_s: 1.0

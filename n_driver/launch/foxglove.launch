@@ -1,12 +1,10 @@
 <?xml version="1.0"?>
 <launch>
     <arg name="port" default="8765"/>
-
-    <!-- regex of services Foxglove may call; $^ matches none -->
     <arg name="services" default="$^"/>
 
     <node name="foxglove" pkg="foxglove_bridge" type="foxglove_bridge" output="screen">
-        <param name="port"    value="$(arg port)"/>
+        <param name="port" value="$(arg port)"/>
         <param name="address" value="0.0.0.0"/>
         <rosparam param="service_whitelist" subst_value="true">["$(arg services)"]</rosparam>
     </node>

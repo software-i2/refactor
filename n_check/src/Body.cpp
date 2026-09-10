@@ -57,10 +57,8 @@ const char *Jaws::missing() const {
     return NULL;
 }
 
-// Folded exactly as reach_pcloud handle_geom.fold_jaws does. blade_origin is
-// measured in the hinge frame and the joint turns about ee -X, so the blade
-// swings away from the centreline; reading it as an ee-frame offset puts the
-// blade on the wrong side and reads the throat as 50 mm instead of 15.
+// Geometry note: blade_origin is expressed in the hinge frame, not the EE frame.
+// Using the EE-frame convention flips the jaw orientation and misreads the throat.
 void Body::buildLattice() {
     lattice_.clear();
 
@@ -86,9 +84,7 @@ void Body::buildLattice() {
 
     box_ok_ = true;
 
-    // The box above is what the throat gap and the depth cap are read off, and
-    // neither needs samples. Only the lattice does, and with no field there is
-    // nothing to sample against.
+    // Only the lattice needs sampling; without a field there is nothing to sample.
     if (pitch_ <= 0.0) {
         return;
     }
@@ -106,7 +102,7 @@ void Body::buildLattice() {
         }
     }
 
-    // Left blade first, then right, so a caller can name which one refused.
+    // Left blade first, then right, to keep the side association explicit.
     for (int side = 0; side < 2; ++side) {
         const double mirror = side == 0 ? 1.0 : -1.0;
         for (int i = 0; i <= n[0]; ++i) {
@@ -146,8 +142,7 @@ void Body::volume(const kine::Geom &g, const kine::Joints &q,
         return;
     }
 
-    // The lattice is relative to the ee origin, and the mount is that origin, so
-    // the blades ride the wrist directly.
+    // The lattice is relative to the EE origin, so the blades ride the wrist directly.
     buf.resize(lattice_.size());
     for (size_t i = 0; i < lattice_.size(); ++i) {
         const kine::Vec3 &e = lattice_[i];
@@ -159,8 +154,8 @@ void Body::volume(const kine::Geom &g, const kine::Joints &q,
     out.count  = buf.size();
 }
 
-// The inner face runs root to tip; interpolate it at `depth`. Sampling the whole
-// box instead would report ~0, because the box's root corner crosses the axis.
+// Interpolate along the inner face instead of sampling the whole box; the box root
+// crosses the axis and would skew the result toward zero.
 double Body::throatHalfGap(double depth) const {
     if (!box_ok_) {
         return 0.0;

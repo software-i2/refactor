@@ -14,8 +14,8 @@ namespace {
 
 const double kNoNumber = std::numeric_limits<double>::quiet_NaN();
 
-// Scalars and one-level lists are leaves; maps recurse. A list stays whole so a
-// four-element window reads as one key rather than four.
+// Scalars and one-level lists are leaves; maps recurse.
+// Lists stay whole so a four-element window is one key, not four.
 void flatten(const YAML::Node &node,
              const std::string &prefix,
              std::map<std::string, std::string> &leaf,
@@ -91,7 +91,7 @@ bool Doc::load(const std::string &path,
     return problems_.empty();
 }
 
-// A key belongs to an owned section when its first dotted part is one.
+// A key belongs to an owned section when its first dotted segment matches.
 bool Doc::owned(const std::string &key) const {
     const std::string::size_type dot = key.find('.');
     return own_.find(dot == std::string::npos ? key : key.substr(0, dot)) != own_.end();

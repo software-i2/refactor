@@ -70,8 +70,7 @@ std::vector<Note> openScene(const std::string &path,
     std::vector<Note> out;
     const bool        loaded = openField(path, field, out);
 
-    // Blade sampling is fixed by the field, not chosen: the exporter sizes the
-    // jaw dilation for a pitch of half a voxel. With no field there is nothing
+    // The field fixes the blade sampling pitch; without a field there is nothing
     // to sample against, so no lattice is built.
     const double pitch = loaded ? Jaws::bladePitch(field.res()) : 0.0;
     body.reset(new Body(jaws, pitch));
@@ -89,9 +88,8 @@ std::vector<Note> openScene(const std::string &path,
         say(out, Note::ERROR, "  " + why);
     }
 
-    // The rest pose is known good, so if the field refuses it the field is
-    // wrong, not the pose -- and every move would be refused without this
-    // saying why. It takes an FK, so it waits on the geometry solving.
+    // If the rest pose is rejected by the field, the field is likely wrong rather
+    // than the pose; this check explains why.
     if (g.ok() && blocksItself(field, *body, g, safe, why)) {
         say(out, Note::ERROR, "  UNUSABLE FIELD: " + why);
     }

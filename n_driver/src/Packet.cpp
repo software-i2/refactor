@@ -21,7 +21,7 @@ const std::array<uint8_t, 256> kCrcTable = []() {
     return t;
 }();
 
-// crcmod(0x14D, init 0xFF, xorOut 0xFF, reversed) pre-XORs init with xorOut, so this starts at 0.
+// CRC matches the vendor framing: init/xorOut pre-XORed, so this starts at 0.
 uint8_t crc8(const uint8_t *data, size_t len) {
     uint8_t crc = 0x00;
     for (size_t i = 0; i < len; ++i) {
@@ -67,7 +67,7 @@ std::vector<uint8_t> cobsDecode(const std::vector<uint8_t> &in) {
             }
             out.push_back(in[i]);
         }
-        // Every group but the last stands for a zero byte.
+        // All but the final group represent a zero byte.
         if (code != 0xFF && i < in.size()) {
             out.push_back(0x00);
         }
@@ -75,7 +75,7 @@ std::vector<uint8_t> cobsDecode(const std::vector<uint8_t> &in) {
     return out;
 }
 
-// Trailer is [.. payload .., id, device, length, crc].
+// Trailer format: payload, id, device, length, crc.
 bool parse(const std::vector<uint8_t> &raw, Packet &out) {
     const std::vector<uint8_t> body = cobsDecode(raw);
     if (body.size() < 4 || body[body.size() - 2] != static_cast<uint8_t>(body.size())) {

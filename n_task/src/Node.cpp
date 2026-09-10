@@ -73,9 +73,7 @@ Node::Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
     loadField(field_path);
 }
 
-// The same field n_ctrl checks paths against, opened by the same code. Both log
-// the digest, so the two disagreeing about which world they are in shows up in
-// the log.
+// The task and controller use the same field loader; mismatches show up in logs.
 void Node::loadField(const std::string &path) {
     const std::vector<check::Note> notes =
             check::openScene(path, jaws_, g_, ctrl::restPose(g_.params(), limits_), field_, body_);
@@ -147,8 +145,7 @@ bool Node::plan(const std::vector<float> &data, std::string &why) {
         why.clear();
     }
 
-    // Every candidate gets a real solve. Ranking is not a heuristic applied
-    // before anything was solved -- it is the cost of the postures that came back.
+    // Solve every candidate first; ranking is based on the resulting postures.
     last_       = choose(g_, *body_, field_, p_.ask, candidates, seed, scratch_);
     candidates_ = candidates;
 
@@ -175,7 +172,7 @@ void Node::publishChosen() {
         return;
     }
 
-    // Turn +x onto the approach; the shortest rotation is enough to aim an arrow.
+    // Rotate +x onto the approach to draw a direction arrow.
     const kine::Vec3 a = kine::unit(hold_.approach);
     const kine::Vec3 axis{0.0, -a.z, a.y};              // cross({1,0,0}, a)
     const double     s = kine::norm(axis);

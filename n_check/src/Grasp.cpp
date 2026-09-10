@@ -12,9 +12,8 @@ namespace {
 
 constexpr double kUnitEps = 1e-9;
 
-// The straight run from standoff to handle, sampled `steps` times. Without this
-// the ranking is blind to the corridor: it offers a handle, the arm drives to
-// the standoff, and only then does the path check look and refuse.
+// Sample the straight run from standoff to handle so the scorer sees the corridor,
+// not just the final pose.
 bool legClear(const kine::Geom &g,
               const Body &b,
               const Field &f,
@@ -135,15 +134,14 @@ Hold holdable(const kine::Geom &g,
     const kine::Vec3 axis = kine::unit(ask.axis);
     const double     pn   = kine::norm(ask.approach);
 
-    // The gate only runs when the caller gave a direction to hold the arm to.
+    // The gate only matters when a preferred approach direction is supplied.
     const bool       gated = pn >= kUnitEps && ask.max_approach_dev_deg > 0.0;
     const kine::Vec3 want  = pn >= kUnitEps ? kine::unit(ask.approach) : kine::Vec3();
     const double     worst_dev =
             kine::deg2rad(kine::clamp(ask.max_approach_dev_deg, 0.0, 180.0));
 
-    // Shifting where along the claw the handle lands needs a direction to shift
-    // along, and the approach is the only one given. With none, the throat's own
-    // depth is the only one that can be tried.
+    // Without a specified approach direction, the throat depth itself is the only
+    // valid target offset.
     const double nominal = g.params().mount_to_throat;
     double       deepest = std::min(ask.depth_max_m, b.maxDepth());
     double       shallow = std::min(ask.depth_min_m, deepest);
@@ -157,8 +155,8 @@ Hold holdable(const kine::Geom &g,
 
     std::vector<kine::Branch> branches;  // reused across depths
 
-    // Deepest first: the gap between the blades widens down the claw, so the
-    // deepest hold that clears has the most room around it.
+    // Try the deepest valid hold first; the throat opens toward the tip, so it is
+    // the most forgiving clearance point.
     for (double depth = deepest; depth >= shallow - 1e-9 && !found; depth -= step) {
         const double     back = depth - nominal;
         const kine::Vec3 target =
@@ -186,8 +184,8 @@ Hold holdable(const kine::Geom &g,
                 continue;
             }
 
-            // One of the pair is normally outside the wrist window, so a single
-            // rejection means nothing; only both failing is a clocking failure.
+            // One wrist option is usually outside the window; a single miss is not a
+            // clocking failure until both options fail.
             bool any_fit = false;
             for (int t = 0; t < 2; ++t) {
                 double q_wrist = 0.0;

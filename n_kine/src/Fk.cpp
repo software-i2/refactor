@@ -31,7 +31,7 @@ Pose forward(const Geom &g, const Joints &q) {
     const double wr_x = el_x + l2.len * std::sin(l2.psi + a2);
     const double wr_z = el_z + l2.len * std::cos(l2.psi + a2);
 
-    // The tool is coaxial, so every point past the wrist is this axis scaled.
+    // The tool is coaxial, so points past the wrist follow the wrist axis.
     const double ax_x = std::sin(a2);
     const double ax_z = std::cos(a2);
 
