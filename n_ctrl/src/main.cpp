@@ -20,8 +20,6 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    // `driver` is borrowed: the hardware window and the rest pose belong to
-    // n_driver, and are read here rather than written down a second time.
     conf::Doc doc;
     doc.load(config, {"world", "arm", "jaws", "ctrl"}, {"driver"});
 

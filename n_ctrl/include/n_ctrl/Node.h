@@ -17,16 +17,12 @@ namespace ctrl {
 
 class Node {
 public:
-    // Everything already loaded and checked by main: the geometry, the jaws and
-    // the policy. The node does not read config itself, so there is no second
-    // path by which n_ctrl and n_task could end up describing different arms.
     Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
          const reach::Limits &limits, const std::string &field_path);
 
     void tick();
 
 private:
-    // Publishes each waypoint to the driver.
     class TopicSink : public Sink {
     public:
         void send(const kine::Joints &q) override;
@@ -49,7 +45,6 @@ private:
     bool onReturn(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
     bool onRest(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
 
-    // All four move services differ only by these two flags.
     bool handle(Srv_SetFloat32Array_Request &req,
                 Srv_SetFloat32Array_Response &res,
                 bool straight,
@@ -57,20 +52,10 @@ private:
                 const char *what);
 
     Move move(const kine::Vec3 &v, bool straight, bool relative);
-
-    // Straight to a posture. Used for the leg that puts the arm on the standoff,
-    // where what matters is not the point but ending in the exact posture the
-    // grasp was solved on.
     Move moveJoints(const kine::Joints &goal, bool record = true);
-
-    // A line flown on a named branch at a named roll. The grasp gate cleared the
-    // field for one posture; any other puts the jaws somewhere it never looked.
     Move moveGrasp(const Leg &leg);
 
-    // Consistent copy of the latest feedback; false until the first arrives.
     bool snapshot(kine::Joints &q);
-    // `record` false leaves the trail alone: a retrace is not itself part of
-    // the outbound path, and recording it would send the next return back out.
     void run(const Path &path, const kine::Joints &from, Move &out, bool record = true);
     void report(const Move &m, const char *what);
     void publishPose(const kine::Joints &q);
@@ -97,9 +82,6 @@ private:
     check::Jaws   jaws_;
     reach::Limits limits_;
 
-    // Nothing loaded blocks nothing, so no field means floor and limits only.
-    // The body is built after the field, because how finely its blades are
-    // sampled is fixed by the field's voxel size rather than set by hand.
     check::Field                 field_;
     std::unique_ptr<check::Body> body_;
     std::vector<kine::Vec3>      scratch_;
@@ -109,7 +91,6 @@ private:
     Exec       exec_;
     Trail      trail_;
 
-    // onStates runs on the spinner, tick on the main loop.
     std::mutex   mtx_;
     kine::Joints q_{};
     bool         seen_        = false;
@@ -119,6 +100,6 @@ private:
     bool  retracing_ = false;
 };
 
-}  // namespace ctrl
+}
 
-#endif  // N_CTRL_NODE_H
+#endif

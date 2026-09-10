@@ -29,7 +29,6 @@ int stepsBetween(const Params &p, const kine::Joints &from, const kine::Joints &
     for (int j = 0; j < kine::DOF; ++j) {
         worst_deg = std::max(worst_deg, kine::rad2deg(std::fabs(to[j] - from[j])));
     }
-    // The joint with furthest to go sets the count; the rest move in proportion.
     const int steps = static_cast<int>(std::ceil(worst_deg / p.max_joint_step_deg));
     return steps < 1 ? 1 : steps;
 }
@@ -127,8 +126,6 @@ void planJoint(const Params &p,
     interpolate(from, to, stepsBetween(p, from, to), out);
 }
 
-// Picks the branch once, from `from`, then hands over. Choosing per knot let the
-// arm change posture part way along a line it was supposed to fly straight.
 Status planLine(const kine::Geom &g,
                 const Params &p,
                 const kine::Joints &from,
@@ -136,8 +133,6 @@ Status planLine(const kine::Geom &g,
                 Path &out,
                 double &deviation_m) {
 
-    // Whichever branch the cheapest solution sits on, held for the whole line.
-    // The roll stays where it is: a plain line move has no opinion about it.
     kine::Joints goal;
     kine::Branch chosen;
     const Status s = solveTarget(g, from, target, goal, &chosen);
@@ -174,10 +169,6 @@ Status planLineOn(const kine::Geom &g,
         knots = 1;
     }
 
-    // IK every knot on the line first, so a break is found before anything runs.
-    // Every one is solved on the branch the caller named, and the roll is pinned
-    // throughout -- it cannot move the throat, so pinning costs nothing and it
-    // guarantees the jaws are still square on arrival.
     Path solved;
     kine::Joints first = from;
     first[kine::WRIST] = leg.q_wrist;
@@ -196,16 +187,11 @@ Status planLineOn(const kine::Geom &g,
         solved.push_back(q);
     }
 
-    // One step count for every segment, or the tip surges on the short ones and
-    // crawls on the long ones. Constant speed is the whole point of a line move.
     int sub = 1;
     for (size_t k = 0; k + 1 < solved.size(); ++k) {
         sub = std::max(sub, stepsBetween(p, solved[k], solved[k + 1]));
     }
 
-    // Between knots the joints interpolate, so the throat bows off the line by
-    // the chord error. One FK per waypoint to measure it, which is why the
-    // knots are spaced at line_step_m rather than more finely.
     deviation_m           = 0.0;
     const size_t measured = out.size();
     for (size_t k = 0; k + 1 < solved.size(); ++k) {
@@ -264,7 +250,6 @@ Status admit(const kine::Geom &g,
             if (wire >= kp.wire_lo_deg[j] && wire <= kp.wire_hi_deg[j]) {
                 continue;
             }
-            // Almost always a calibration problem rather than a bad target.
             std::snprintf(buf, sizeof(buf),
                           "waypoint %u would need joint %d at %.2f deg, outside the [%.2f, %.2f] "
                           "the arm accepts. This usually means zero_offset_deg is uncalibrated.",
@@ -276,5 +261,3 @@ Status admit(const kine::Geom &g,
 
     return Status::OK;
 }
-
-}  // namespace ctrl

@@ -13,7 +13,6 @@
 
 namespace check {
 
-// One line of the load report, at the level the caller should log it.
 struct Note {
     enum Level { INFO, WARN, ERROR };
 
@@ -21,13 +20,6 @@ struct Note {
     std::string text;
 };
 
-// Opens the field named by `path` (empty means none), builds the Body at the
-// pitch that field fixes, and says what it found. `safe` is a posture known to
-// be reachable, used to catch a field with the arm itself in it; it is only
-// consulted when the geometry solves.
-//
-// Every node that checks paths opens the same file the same way, so the
-// sequence lives here rather than once per node, where the two could drift.
 std::vector<Note> openScene(const std::string &path,
                             const Jaws &jaws,
                             const kine::Geom &g,

@@ -1,12 +1,3 @@
-// Copyright by BeeX [2026]
-//
-// Plain g++, no ROS:
-//   g++ -std=c++17 -Iinclude -I../n_check/include -I../n_kine/include -I../n_conf/include
-//       test/check.cpp src/Path.cpp src/Exec.cpp src/Trail.cpp ../n_check/src/*.cpp
-//       ../n_kine/src/*.cpp ../n_conf/src/Doc.cpp -lyaml-cpp -o /tmp/check
-//
-// argv[1] is the config; it defaults to ../n_conf/config/arm.yaml.
-
 #include <n_check/Body.h>
 #include <n_check/Grasp.h>
 #include <n_ctrl/Exec.h>
@@ -23,8 +14,6 @@ using namespace ctrl;
 
 static int failures = 0;
 
-// The config is the only source of these numbers, so the test reads the same
-// file the nodes do rather than a second copy that could drift from it.
 static bool loadConfig(const char *path, conf::Doc &doc,
                        const std::vector<std::string> &own,
                        const std::vector<std::string> &borrow) {
@@ -43,7 +32,6 @@ static void expect(bool pass, const char *what) {
     failures += pass ? 0 : 1;
 }
 
-// Follows every waypoint exactly, unless told to seize a joint.
 class FakeArm : public Sink {
 public:
     void send(const kine::Joints &q) override {
@@ -91,11 +79,9 @@ int main(int argc, char **argv) {
     const double rest_wire[kine::DOF] = {0.0, 90.0, 1.0, 1.0};
     const kine::Joints rest = kine::toKinematic(g.params(), rest_wire);
 
-    // ── planning ──────────────────────────────────────────────────────────
     const kine::Vec3 target{0.15, 0.05, 0.10};
     kine::Joints     goal;
 
-    // Not an assertion, but the call under test: the goal comes from here.
     solveTarget(g, rest, target, goal);
 
     Path path;
@@ -111,14 +97,12 @@ int main(int argc, char **argv) {
                 path.size(), worst_step, p.max_joint_step_deg);
     expect(worst_step <= p.max_joint_step_deg + 1e-9, "no waypoint exceeds max_joint_step_deg");
 
-    check::Field no_field;   // nothing loaded blocks nothing
-    // No field, so no blade lattice: there is nothing to sample against.
+    check::Field no_field;
     const check::Body       body(jaws, 0.0);
     std::vector<kine::Vec3> scratch;
     std::string             why;
     expect(admit(g, p, path, no_field, body, scratch, why) == Status::OK, "the path is admitted");
 
-    // ── straight line ─────────────────────────────────────────────────────
     Path   line;
     double dev = 0.0;
     const Status ls = planLine(g, p, rest, target, line, dev);
@@ -127,17 +111,15 @@ int main(int argc, char **argv) {
     expect(dev <= p.line_step_m, "the throat stays within line_step_m of the line");
     expect(line.size() > path.size(), "the line costs more waypoints than the joint move");
 
-    // ── refusals ──────────────────────────────────────────────────────────
     kine::Joints ignored;
     expect(solveTarget(g, rest, {5.0, 0.0, 0.1}, ignored) == Status::UNREACHABLE,
           "a far target is UNREACHABLE");
 
     Params floored = p;
-    floored.floor_z_m = 1.0;  // floor above the whole arm
+    floored.floor_z_m = 1.0;
     expect(admit(g, floored, path, no_field, body, scratch, why) == Status::FLOOR,
           "a path under the floor is refused");
 
-    // ── execution ─────────────────────────────────────────────────────────
     FakeArm arm;
     arm.at = rest;
     Exec    exec(p, arm);
@@ -155,7 +137,6 @@ int main(int argc, char **argv) {
     expect(arm.sent == static_cast<int>(path.size()), "every waypoint is issued exactly once");
     expect(done == State::REACHED, "a followed path reaches");
 
-    // ── pillow stop ───────────────────────────────────────────────────────
     FakeArm stuck_arm;
     stuck_arm.at    = rest;
     stuck_arm.stuck = kine::SHOULDER;
@@ -173,7 +154,6 @@ int main(int argc, char **argv) {
     expect(pillow.pillowJoint() == kine::SHOULDER, "the pillow stop names the seized joint");
     expect(stuck_arm.released == 1, "a pillow stop releases the arm to standby");
 
-    // ── stall ─────────────────────────────────────────────────────────────
     FakeArm frozen;
     frozen.at = rest;
     Exec stall(p, frozen);
@@ -187,7 +167,6 @@ int main(int argc, char **argv) {
     expect(late == State::STALLED, "not arriving before the timeout STALLS");
     expect(frozen.released == 1, "a stall releases the arm to standby");
 
-    // ── trail ─────────────────────────────────────────────────────────────
     Trail trail;
     trail.start(rest);
     trail.add(path);
@@ -203,7 +182,6 @@ int main(int argc, char **argv) {
     fresh.add(path);
     expect(fresh.empty(), "a trail that was never started records nothing");
 
-    // ── obstacles, when a field is given ──────────────────────────────────
     if (argc > 1) {
         check::Field real;
         std::string  err;
@@ -217,10 +195,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    // ── the whole pick, end to end ────────────────────────────────────────
-    // This is the seam the package tests could never reach: n_check proves the
-    // clocking is computed, n_ctrl proves a line reaches its target, and the
-    // arm still arrived crooked because nothing carried the roll between them.
     {
         std::printf("\n  -- the pick, run leg by leg --\n");
 
@@ -240,7 +214,6 @@ int main(int argc, char **argv) {
             Exec    exec(p, arm);
             double  t = 0.0;
 
-            // leg 1: to the standoff POSTURE, not merely its point.
             Path leg1;
             planJoint(p, rest, h.standoff, leg1);
             expect(admit(g, p, leg1, none, body, scratch, why) == Status::OK,
@@ -260,14 +233,12 @@ int main(int argc, char **argv) {
                         worst, worst_j);
             expect(worst < 1e-9, "leg 1 lands on the standoff posture exactly");
 
-            // leg 2: the line in, on the gate's branch and roll.
             Leg leg;
             leg.target     = h.point;
             leg.q_wrist    = h.joints[kine::WRIST];
             leg.facing_out = h.facing_out;
             leg.elbow_up   = h.elbow_up;
 
-            // and it survives the wire it would cross to get there.
             Leg         wired;
             std::string decode_why;
             expect(decodeLeg(encodeLeg(leg), wired, decode_why), "the leg survives the wire");
@@ -302,8 +273,6 @@ int main(int argc, char **argv) {
             expect(square < 1e-6 || std::fabs(square - 180.0) < 1e-6,
                    "the jaws arrive square to the handle");
 
-            // The regression itself, driven the way n_task used to: two legs,
-            // each given nothing but a point, starting from where the arm is.
             kine::Joints naive_standoff, naive_hold;
             expect(solveTarget(g, rest, h.standoff_point, naive_standoff) == Status::OK
                            && solveTarget(g, naive_standoff, h.point, naive_hold) == Status::OK,

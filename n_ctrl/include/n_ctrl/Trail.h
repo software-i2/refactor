@@ -7,22 +7,11 @@
 
 namespace ctrl {
 
-// Breadcrumbs of where the arm has been driven, so it can back out the way it
-// came. The old driver spread this over four members and seven call sites; the
-// rules live here instead.
 class Trail {
 public:
-    // Begin a fresh outbound run from where the arm is now.
     void start(const kine::Joints &at);
-
-    // Append a leg that is about to run. Ignored unless started.
     void add(const Path &leg);
-
-    // The arm stopped part way through the leg that is running: drop what it
-    // never travelled, then pin the pose it actually stopped at.
     void stoppedAfter(size_t issued, const kine::Joints &at);
-
-    // The way home: everywhere it has been, newest first.
     Path back() const;
 
     void   clear();
@@ -36,6 +25,6 @@ private:
     bool   recording_ = false;
 };
 
-}  // namespace ctrl
+}
 
-#endif  // N_CTRL_TRAIL_H
+#endif

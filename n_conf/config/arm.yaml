@@ -102,7 +102,7 @@ task:
   # Where along the claw to take hold. Searched deepest first, because the gap
   # between the blades widens down the claw.
   depth_min_m: 0.040
-  depth_max_m: 0.075
+  depth_max_m: 0.065
   depth_step_m: 0.005
 
   # Samples along the straight run from standoff to hold, when judging whether

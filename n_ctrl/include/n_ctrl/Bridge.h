@@ -10,7 +10,6 @@
 
 namespace ctrl {
 
-// The driver counts jaw first; the solver counts from the base out.
 constexpr uint32_t WIRE_SLOT[kine::DOF] = {reach::BASE, reach::SHOULDER, reach::ELBOW, reach::WRIST};
 
 inline kine::Joints toKine(const kine::Params &p, const float wire_deg[reach::N_JOINTS]) {
@@ -21,14 +20,10 @@ inline kine::Joints toKine(const kine::Params &p, const float wire_deg[reach::N_
     return q;
 }
 
-// The rest pose, taken from the driver's own table rather than written down
-// again. Both come from the same config keys, so they cannot disagree.
 inline kine::Joints restPose(const kine::Params &p, const reach::Limits &limits) {
     return toKine(p, limits.rest_pos);
 }
 
-// The driver's joint_states, in kinematic radians. False when the message is
-// not the driver's -- a joint missing means someone else published it.
 inline bool readJointState(const kine::Params &p,
                            const sensor_msgs::JointState &msg,
                            kine::Joints &out) {
@@ -52,6 +47,6 @@ inline bool readJointState(const kine::Params &p,
     return true;
 }
 
-}  // namespace ctrl
+}
 
-#endif  // N_CTRL_BRIDGE_H
+#endif

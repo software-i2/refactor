@@ -162,8 +162,6 @@ Node::Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
     loadField(field_path);
 }
 
-// A field is optional. Without one the arm still gets the floor and its joint
-// limits, which is how it behaved before any field existed.
 void Node::loadField(const std::string &path) {
     const std::vector<check::Note> notes =
             check::openScene(path, jaws_, g_, restPose(g_.params(), limits_), field_, body_);
@@ -186,7 +184,7 @@ void Node::loadField(const std::string &path) {
 void Node::onStates(const sensor_msgs::JointState::ConstPtr &msg) {
     kine::Joints q;
     if (!readJointState(g_.params(), *msg, q)) {
-        return;  // not the driver's joint_states
+        return;
     }
 
     std::lock_guard<std::mutex> lock(mtx_);
@@ -209,8 +207,6 @@ void Node::tick() {
         age = now - last_state_s_;
     }
 
-    // Stale feedback cannot say whether the arm is following, and reading it as
-    // "told to move, did not move" would trip a pillow stop that never happened.
     if (age > p_.feedback_timeout_s) {
         exec_.blind();
     }
@@ -224,8 +220,6 @@ void Node::tick() {
     publishPose(q);
     publishBody(q);
 
-    // Crumbs are spent only once the arm is actually home, so a retrace that is
-    // refused or that stops part way can be asked for again.
     if (retracing_ && s == State::REACHED) {
         trail_.clear();
         retracing_ = false;
@@ -344,8 +338,6 @@ void Node::run(const Path &path, const kine::Joints &from, Move &out, bool recor
     out.duration_s = static_cast<double>(path.size()) / p_.rate_hz;
 }
 
-// Straight to a posture, so the arm ends where the grasp was solved rather than
-// at some other solution for the same point.
 Move Node::moveJoints(const kine::Joints &goal, bool record) {
     Move         out;
     kine::Joints q;
@@ -367,7 +359,6 @@ Move Node::moveJoints(const kine::Joints &goal, bool record) {
     return out;
 }
 
-// A line on the branch and at the roll the caller names.
 Move Node::moveGrasp(const Leg &leg) {
     Move         out;
     kine::Joints q;
@@ -401,7 +392,6 @@ Move Node::moveGrasp(const Leg &leg) {
     return out;
 }
 
-// A relative move shifts the current throat position; the maths is the same.
 Move Node::move(const kine::Vec3 &v, bool straight, bool relative) {
     Move         out;
     kine::Joints q;
@@ -551,8 +541,6 @@ bool Node::onReturn(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
     const Path home = trail_.back();
     out.to          = kine::forward(g_, home.back()).throat;
 
-    // The retrace is not itself part of the outbound path: recording it would
-    // leave the trail pointing back out, and the next return would drive there.
     run(home, q, out, false);
     report(out, "return");
     retracing_ = out.ok();
@@ -572,4 +560,4 @@ bool Node::onRest(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
     return true;
 }
 
-}  // namespace ctrl
+}

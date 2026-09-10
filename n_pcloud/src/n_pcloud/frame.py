@@ -1,18 +1,7 @@
 #!/usr/bin/env python
 # Copyright by BeeX [2026]
 
-"""One capture: the cloud, the poses perception offered, and where the camera
-sat when it was taken.
-
-THE SEAM. Everything downstream takes a Frame and nothing else takes a
-placement, so there is exactly one place the camera pose enters and exactly one
-thing to get wrong. Going from a folder of screenshots to a live stream changes
-this file and no other.
-
-The cloud stays in the camera frame on purpose: the free-space carve in
-occupancy.py works along the camera's own rays and cannot be done anywhere
-else. to_arm() is how the rest reaches arm_base.
-"""
+"""Camera capture data and the conversion from camera frame to arm_base."""
 
 from __future__ import print_function
 
@@ -20,10 +9,7 @@ import json
 
 import numpy as np
 
-# The JSON is a camera optical frame: +X right, +Y up, looking down -Z. arm_base
-# is REP-103: +X forward, +Y left, +Z up. The turn between them is a fixed
-# relabel of the axes, with no fitting and nothing invented --
-# x_arm = -z_cam, y_arm = -x_cam, z_arm = y_cam.
+# Camera optical frame -> arm_base.
 CAM_TO_ARM = np.array([[0.0, 0.0, -1.0],
                        [-1.0, 0.0, 0.0],
                        [0.0, 1.0, 0.0]])
@@ -37,7 +23,7 @@ _PLY_TYPES = {
 
 
 def load_ply(path):
-    """Vertex positions from a PLY, metres, in whatever frame the file is in."""
+    """Read XYZ vertices from a binary PLY."""
     with open(path, "rb") as f:
         if f.readline().strip() != b"ply":
             raise ValueError("%s is not a PLY file" % path)
@@ -88,13 +74,7 @@ def _quat_matrix(q):
 
 
 def load_poses(path):
-    """The grasp poses perception offered, camera frame.
-
-    R's columns are gripper-local axes, as the file's own coordinate_convention
-    states: col0 approach, col1 along the handle, col2 closing. That is already
-    the (point, axis, approach) triple the arm wants, which is why features.py
-    is a transform and not an interpretation.
-    """
+    """Read camera-frame grasp poses from the JSON scene metadata."""
     with open(path) as fh:
         doc = json.load(fh)
 
@@ -117,10 +97,7 @@ def load_poses(path):
 
 
 class Frame(object):
-    """A capture, placed. `at` is the camera origin in arm_base, in metres, and
-    it is required -- there is no default placement, because a guessed one puts
-    the whole scene somewhere the arm never looks and nothing downstream can
-    tell."""
+    """A cloud and set of grasp poses in arm_base coordinates."""
 
     def __init__(self, name, points, pos, rot, at):
         self.name = name
@@ -141,6 +118,5 @@ class Frame(object):
 
 
 def read(name, ply_path, json_path, at):
-    """The only way a Frame is built. Nothing downstream opens a file."""
     pos, rot = load_poses(json_path)
     return Frame(name, load_ply(ply_path), pos, rot, at)

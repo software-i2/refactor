@@ -1,5 +1,3 @@
-// Copyright by BeeX [2026]
-
 #include <n_ctrl/Trail.h>
 
 namespace ctrl {
@@ -38,4 +36,4 @@ void Trail::clear() {
     recording_ = false;
 }
 
-}  // namespace ctrl
+}

@@ -16,7 +16,6 @@
 
 namespace task {
 
-// Where the pick has got to. Only ever advanced by a leg finishing.
 enum class Step : uint8_t {
     IDLE = 0,
     TO_STANDOFF,
@@ -32,8 +31,6 @@ const char *name(Step s);
 
 class Node {
 public:
-    // Everything already loaded and checked by main, from the same file and the
-    // same loaders n_ctrl uses.
     Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
          const reach::Limits &limits, const std::string &field_path);
 
@@ -54,27 +51,15 @@ private:
     bool onHome(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
     bool onStop(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
 
-    // Planning only; nothing moves.
     bool plan(const std::vector<float> &data, std::string &why);
-
-    // Logs the last evaluation: every candidate, then the summary.
     void report();
-
-    // Draws the hold that won, so the choice is visible next to the candidates
-    // it was chosen from rather than only described in a log line.
     void publishChosen();
 
-    // Each returns false with a reason rather than throwing the arm at it.
     bool goStandoff(std::string &why);
     bool goGrasp(std::string &why);
     bool goStandoffBack(std::string &why);
 
-    // The standoff leg goes to a posture, not a point: the gate solved a
-    // specific branch and roll, and any other solution for the same point puts
-    // the jaws somewhere the obstacle field never checked.
     bool moveToPose(const kine::Joints &goal, std::string &why);
-
-    // The advance and retreat legs fly a line on that same branch and roll.
     bool moveAlong(const kine::Vec3 &to, std::string &why);
     bool jaw(bool shut, std::string &why);
     void enter(Step s);
@@ -109,8 +94,6 @@ private:
     check::Jaws   jaws_;
     reach::Limits limits_;
 
-    // Built after the field: how finely the blades are sampled is fixed by the
-    // field's voxel size rather than set by hand.
     check::Field                 field_;
     std::unique_ptr<check::Body> body_;
     std::vector<kine::Vec3>      scratch_;
@@ -122,15 +105,12 @@ private:
     check::Hold hold_;
     bool        planned_ = false;
 
-    // The last evaluation, kept whole so preview can report it without solving
-    // again. This is what says which candidates were live and why one won.
     Choice                 last_;
     std::vector<Candidate> candidates_;
 
     Step   step_       = Step::IDLE;
     double leg_began_s_ = 0.0;
 
-    // What n_ctrl last reported, so a leg knows when it has finished.
     ctrl::State ctrl_state_ = ctrl::State::IDLE;
     bool        ctrl_seen_  = false;
 };

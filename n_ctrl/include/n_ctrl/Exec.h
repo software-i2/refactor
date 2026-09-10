@@ -12,11 +12,11 @@ namespace ctrl {
 
 enum class State : uint8_t {
     IDLE        = 0,
-    APPROACHING = 1,  // still issuing waypoints
-    SETTLING    = 2,  // all issued, waiting for the arm to catch up
+    APPROACHING = 1,
+    SETTLING    = 2,
     REACHED     = 3,
-    STALLED     = 4,  // did not arrive before arrival_timeout_s
-    PILLOW      = 5,  // a joint stopped following while still being driven
+    STALLED     = 4,
+    PILLOW      = 5,
     ABORTED     = 6
 };
 
@@ -39,16 +39,13 @@ inline const char *name(State s) {
     }
 }
 
-// Where waypoints go. The node's implementation publishes them; the tests use
-// one that just records.
 class Sink {
 public:
     virtual ~Sink() = default;
     virtual void send(const kine::Joints &q) = 0;
-    virtual void release() = 0;  // hand the arm back to standby
+    virtual void release() = 0;
 };
 
-// Plays a path back one waypoint per tick and watches whether the arm follows.
 class Exec {
 public:
     Exec(const Params &p, Sink &sink) : p_(p), sink_(sink) {}
@@ -56,9 +53,7 @@ public:
     bool load(const Path &path);
     void abort();
 
-    // Latest measurement; call before tick.
     void measure(const kine::Joints &q);
-    // Nothing answered this cycle, so following cannot be judged.
     void blind();
 
     State tick(double now_s);
@@ -89,6 +84,6 @@ private:
     int pillow_joint_ = -1;
 };
 
-}  // namespace ctrl
+}
 
-#endif  // N_CTRL_EXEC_H
+#endif

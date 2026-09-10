@@ -50,7 +50,6 @@ bool Exec::arrived() const {
     return true;
 }
 
-// Compares the last waypoint's demand against what the arm actually did.
 int Exec::notFollowing() const {
     if (!p_.pillow_stop || !have_prev_ || !have_now_ || next_ < 2) {
         return -1;
@@ -72,7 +71,6 @@ State Exec::tick(double now_s) {
     if (state_ == State::APPROACHING) {
         const int held = notFollowing();
         if (held >= 0 && ++strikes_ >= p_.pillow_strikes) {
-            // Released, but the path is kept: backing out is the way home.
             pillow_joint_ = held;
             state_        = State::PILLOW;
             sink_.release();
@@ -97,7 +95,7 @@ State Exec::tick(double now_s) {
     }
 
     if (state_ != State::SETTLING) {
-        return state_;  // idle, or holding an outcome until the next load
+        return state_;
     }
 
     if (arrived()) {
@@ -110,5 +108,3 @@ State Exec::tick(double now_s) {
     }
     return state_;
 }
-
-}  // namespace ctrl

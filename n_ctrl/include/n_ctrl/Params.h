@@ -8,41 +8,24 @@
 
 namespace ctrl {
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EVERY TUNABLE MOTION HAS. Filled by load() from the `ctrl` and `world`
-// sections of n_conf/config/arm.yaml. Nothing here carries
-// a default: a field still holding kine::NONE means the load was skipped.
-// ─────────────────────────────────────────────────────────────────────────────
 struct Params {
-    // Waypoints issued per second. With max_joint_step_deg this sets the
-    // fastest any joint can travel: 1.0 deg at 5 Hz is 5 deg/s.
     double rate_hz = kine::NONE;
 
-    // Path shape.
-    double max_joint_step_deg = kine::NONE;  // biggest joint move in one waypoint
-    double line_step_m        = kine::NONE;  // knot spacing on a straight-line move
+    double max_joint_step_deg = kine::NONE;
+    double line_step_m        = kine::NONE;
 
-    // Arrival.
     double goal_tolerance_deg = kine::NONE;
 
-    // joint_states older than this cannot say whether the arm is following, so
-    // pillow detection is suspended rather than tripping on stale numbers.
     double feedback_timeout_s = kine::NONE;
-    double arrival_timeout_s  = kine::NONE;  // then release to standby, report STALLED
+    double arrival_timeout_s  = kine::NONE;
 
-    // No part of the arm may go below this height. Shared with n_task, so it
-    // lives in `world` and neither can set it a different way.
     double floor_z_m = kine::NONE;
 
-    // Pillow stop: a joint told to move at least min_step but following less
-    // than follow_frac of it, strikes times running, has hit something the
-    // obstacle field does not know about.
     bool   pillow_stop         = false;
     double pillow_min_step_deg = kine::NONE;
     double pillow_follow_frac  = kine::NONE;
     int    pillow_strikes      = -1;
 
-    // Fills every field from the `ctrl` and `world` sections.
     void load(conf::Doc &doc) {
         rate_hz            = doc.num("ctrl.rate_hz");
         max_joint_step_deg = doc.num("ctrl.max_joint_step_deg");
@@ -59,10 +42,9 @@ struct Params {
         floor_z_m = doc.num("world.floor_z_m");
     }
 
-    // Name of the first field still unset, or NULL when all of them are filled.
     const char *missing() const;
 };
 
-}  // namespace ctrl
+}
 
-#endif  // N_CTRL_PARAMS_H
+#endif

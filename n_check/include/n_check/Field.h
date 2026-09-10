@@ -11,12 +11,8 @@
 
 namespace check {
 
-// One dilation radius per link, baked into the field by the exporter. The two
-// jaw blades share the jaw radius.
 enum Link : int { UPPER_ARM = 0, FOREARM, WRIST_MOUNT, PALM, JAW, N_LINKS };
 
-// Occupancy the camera saw, as one voxel grid with a bit per link. Written by
-// n_pcloud scene.py --out; see n_pcloud/field_format.py for the header layout.
 class Field {
 public:
     bool load(const std::string &path, std::string &err);
@@ -25,13 +21,10 @@ public:
     bool ok() const { return ok_; }
     bool empty() const { return !ok_ || occupied_ == 0; }
 
-    // Outside the mapped volume counts as free: the map only covers what the
-    // camera saw, and refusing everything beyond it would strand the arm.
     bool blocked(const kine::Vec3 &p, int link) const;
     bool blockedSegment(const kine::Vec3 &a, const kine::Vec3 &b, int link) const;
     bool blockedPoints(const kine::Vec3 *pts, size_t count, int link) const;
 
-    // The blocked samples along a segment, for drawing what was hit.
     void samples(const kine::Vec3 &a, const kine::Vec3 &b, int link,
                  std::vector<kine::Vec3> &out) const;
 
@@ -52,7 +45,6 @@ private:
         return (static_cast<size_t>(i) * dims_[1] + j) * dims_[2] + k;
     }
 
-    // One walk along a segment. `out` null stops at the first hit.
     bool walk(const kine::Vec3 &a, const kine::Vec3 &b, int link,
               std::vector<kine::Vec3> *out) const;
 

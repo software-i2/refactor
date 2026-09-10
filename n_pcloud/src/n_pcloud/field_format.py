@@ -1,24 +1,7 @@
 #!/usr/bin/env python
 # Copyright by BeeX [2026]
 
-"""The one Python definition of the BXFIELD container.
-
-FROZEN. n_check/src/Field.cpp is the other half, and it is an unavoidably
-separate implementation -- MAGIC is the contract between them, so bump it
-whenever the layout changes and a mismatched file is refused rather than
-misread. Nothing else in this package should know the byte order.
-
-    char   magic[8]
-    double res, step, reserved (was margin, always 0)
-    double lo[3]              grid origin in arm_base
-    int32  dims[3]
-    int32  nlinks
-    uint64 digest             the inputs this was built from
-    double placement[3]       camera origin in arm_base
-    double placement_rpy[3]   always zero; see scene.py
-    double radii[nlinks]
-    uint8  data[dims0*dims1*dims2]
-"""
+"""BXFIELD serialization for the obstacle field."""
 
 from __future__ import print_function
 
@@ -33,8 +16,7 @@ _HEADER_BYTES = 8 + 24 + 24 + 12 + 4 + 8 + 24 + 24
 
 
 def digest(ply_path, json_path, res, delta, xyz, links, filt=()):
-    """Identifies the inputs a field was built from, so a stale one is spotted
-    rather than loaded silently against the wrong world."""
+    """Stable input fingerprint for a scene field."""
     h = hashlib.sha256()
     for path in (ply_path, json_path):
         with open(path, "rb") as fh:

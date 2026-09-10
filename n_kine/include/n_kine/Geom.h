@@ -19,13 +19,7 @@ using Joints = std::array<double, DOF>;  // kinematic radians
 // skipped or was not checked. Params::missing() names the first such field.
 constexpr double NONE = std::numeric_limits<double>::quiet_NaN();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EVERY TUNABLE THE SOLVER HAS. Lengths metres, angles degrees, joint arrays in
-// BASE, SHOULDER, ELBOW, WRIST order. Filled by load() from the `arm`
-// section of n_conf/config/arm.yaml.
-// ─────────────────────────────────────────────────────────────────────────────
 struct Params {
-    // Link transforms in the arm plane, from alpha_description/xacro/alpha.urdf.xacro.
     double base_to_e_z = NONE;     // base -> axis_e
     double e_to_d_x    = NONE;     // axis_e -> axis_d
     double e_to_d_z    = NONE;
@@ -94,39 +88,29 @@ struct Params {
     const char *missing() const;
 };
 
-// A kinked link folded into a straight one: reach `len` at `psi` off the frame.
 struct Link {
     double len = 0.0;
     double psi = 0.0;
 };
 
-// Params with the folding done once. Everything below is derived, never tuned.
 class Geom {
 public:
     explicit Geom(const Params &p);
 
     bool ok() const { return ok_; }
-
-    // Why ok() is false: an unfilled field, or geometry that cannot be solved.
     const char *fault() const { return fault_; }
 
     const Params &params() const { return p_; }
 
-    // Forearm as seen from the elbow when aiming a point `along` the wrist axis,
-    // measured from the axis_b pivot. Throat, tip and the bare wrist are all
-    // this function with a different offset.
     Link forearm(double along) const;
-    Link forearmRaw() const { return forearm_raw_; }  // to the axis_b pivot
+    Link forearmRaw() const { return forearm_raw_; }
     Link upperArm() const { return upper_; }
 
-    // +1, or -1 when the axis_d -> axis_c yaw reverses the elbow.
     double elbowSign() const { return elbow_sign_; }
 
-    // Reach of a tool point about the shoulder pivot.
     double reachMin(double along) const;
     double reachMax(double along) const;
 
-    // Kinematic limits intersected with what the hardware accepts.
     double windowLo(int j) const { return win_lo_[j]; }
     double windowHi(int j) const { return win_hi_[j]; }
 

@@ -3,17 +3,7 @@
 #
 # Melodic only ships rospy for python2.7, so this must NOT say python3.
 
-"""Draw what the arm is actually checking against.
-
-    rosrun n_pcloud viz.py --field data/field.bin --scene 000390
-
-There is no --at. The placement is read out of the field header, so the cloud
-cannot be drawn somewhere the field was not built -- which is the whole class
-of bug that came from passing xyz to eight scripts separately.
-
-Every layer is its own latched topic, so the toggle is the one your viewer
-already has. Nothing is computed for a topic nobody is subscribed to.
-"""
+"""Visualize the obstacle field and handle candidates."""
 
 from __future__ import print_function
 
@@ -44,8 +34,7 @@ def cloud(points, stamp):
 
 
 def plane_points(head, bit, stride):
-    """Centres of the cells one link is blocked in. `stride` thins the cloud:
-    the field is a solid, and drawing every cell of it hides the arm inside."""
+    """Cell centers for one blocked link plane."""
     hit = np.argwhere((head["data"] & (1 << bit)) != 0)
     if stride > 1:
         hit = hit[(hit % stride == 0).all(axis=1)]
@@ -53,7 +42,7 @@ def plane_points(head, bit, stride):
 
 
 def _quat(R):
-    """Rotation matrix to xyzw, via the largest diagonal so it stays stable."""
+    """Rotation matrix to quaternion."""
     t = np.trace(R)
     if t > 0.0:
         s = np.sqrt(t + 1.0) * 2.0
@@ -70,7 +59,7 @@ def _quat(R):
 
 
 def poses(cand, stamp):
-    """One arrow per candidate, pointing the way the jaws would come in."""
+    """Arrow markers for candidate grasp approach directions."""
     msg = PoseArray()
     msg.header = rospy.Header(stamp=stamp, frame_id=FRAME)
     for point, axis, approach in cand:
@@ -119,6 +108,21 @@ def main():
     rospy.loginfo("[viz] viz/field: the %s plane, %d cells dilated %.1f mm -- where that "
                   "link may not go. --plane jaw for the blades'.",
                   args.plane, len(pts), radius * 1000)
+
+    jaw_radius = dict(links)["jaw"]
+    pure = plane_points(head, names.index("jaw"), args.stride)
+    rospy.Publisher("viz/obstacle", PointCloud2, queue_size=1, latch=True) \
+        .publish(cloud(pure, stamp))
+    if args.plane == "jaw":
+        rospy.loginfo("[viz] viz/obstacle: the same plane again -- the jaw plane is already "
+                      "the handle-free one. Pick --plane upper_arm to see the difference.")
+    else:
+        rospy.loginfo("[viz] viz/obstacle: obstacles only, %d cells dilated %.1f mm. This is "
+                      "the jaw plane, which field.py builds from a grid with TARGET removed, so "
+                      "it is the one layer with no handle in it. What viz/field has and this "
+                      "does not is partly the wider %.1f mm dilation and partly every voxel "
+                      "carve_target claimed as handle -- the blades are free to enter those.",
+                      len(pure), jaw_radius * 1000, radius * 1000)
 
     if args.scene:
         ply = os.path.join(args.data, "ply", "%s_depth_scene.ply" % args.scene)

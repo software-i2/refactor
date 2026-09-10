@@ -3,16 +3,7 @@
 #
 # Melodic only ships numpy/scipy for python2.7, so this must NOT say python3.
 
-"""One capture in, an obstacle field and a set of grasp candidates out.
-
-    rosrun n_pcloud scene.py --scene 000390 --at "-0.2 0 0.3"
-
---at is where the camera sat in arm_base, and it is required. There is no
-default and no lookup table: a guessed placement puts the whole scene somewhere
-the arm never looks, every target comes back unreachable, and nothing
-downstream can tell you why. The value is recorded in the field header, so the
-viz reads it back rather than being told it a second time.
-"""
+"""Build an obstacle field and export grasp candidates for one scene."""
 
 from __future__ import print_function
 
@@ -98,18 +89,18 @@ def main():
     print("  %d points, %d poses, camera at %s in arm_base"
           % (len(f.points), len(f.pos), np.round(f.at, 3)))
 
-    keep, handle, min_hits = None, None, 1
+    keep_mask, handle_mask, hit_threshold = None, None, 1
     if not args.raw:
-        handle = occ.near_grasps(f.points, f.pos, res=args.res)
-        keep = ~occ.flying_pixels(f.points) | handle
-        min_hits = occ.CARVE_MIN_HITS
-        dropped = len(f.points) - int(keep.sum())
+        handle_mask = occ.near_grasps(f.points, f.pos, res=args.res)
+        keep_mask = ~occ.flying_pixels(f.points) | handle_mask
+        hit_threshold = occ.CARVE_MIN_HITS
+        dropped = len(f.points) - int(keep_mask.sum())
         print("  filter dropped %d of %d returns (%.2f%%), %d spared as handle"
               % (dropped, len(f.points), 100.0 * dropped / len(f.points),
-                 int(handle.sum())))
+                 int(handle_mask.sum())))
 
-    label, lo = occ.classify(f.points, res=args.res, keep=keep, trusted=handle,
-                             min_hits=min_hits)
+    label, lo = occ.classify(f.points, res=args.res, keep=keep_mask,
+                             trusted=handle_mask, hit_threshold=hit_threshold)
     label, carved = occ.carve_target(label, lo, args.res, f.pos)
     counts = dict((occ.NAME[v], int((label == v).sum())) for v in occ.NAME)
     print("  grid %s at %.0f mm: %s"
