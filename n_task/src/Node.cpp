@@ -1,0 +1,476 @@
+// Copyright by BeeX [2026]
+
+#include <n_check/Scene.h>
+#include <n_kine/Fk.h>
+#include <n_ctrl/Path.h>
+#include <n_task/Node.h>
+
+#include <n_driver/Time.h>
+
+#include <cmath>
+#include <cstdio>
+
+namespace task {
+
+const char *name(Step s) {
+    switch (s) {
+    case Step::IDLE:
+        return "idle";
+    case Step::TO_STANDOFF:
+        return "moving to the standoff";
+    case Step::AT_STANDOFF:
+        return "at the standoff";
+    case Step::ADVANCING:
+        return "closing in on the handle";
+    case Step::HOLDING:
+        return "holding";
+    case Step::RETREATING:
+        return "backing out";
+    case Step::DONE:
+        return "done";
+    default:
+        return "failed";
+    }
+}
+
+Node::Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
+           const reach::Limits &limits, const std::string &field_path)
+        : p_(p), g_(arm), jaws_(jaws), limits_(limits) {
+
+    INIT_ROS_PUBLISHER(pub_step_, Msg_UInt8, "task/step", 1);
+    INIT_ROS_PUBLISHER(pub_chosen_, Msg_PoseArray, "task/chosen", 1);
+    INIT_ROS_SUBSCRIBER(sub_states_, "joint_states", 1, &Node::onStates);
+    INIT_ROS_SUBSCRIBER(sub_ctrl_, "ctrl/state", 1, &Node::onCtrlState);
+
+    INIT_ROS_SERVICE_SERVER(srv_plan_, "task/plan", &Node::onPlan);
+    INIT_ROS_SERVICE_SERVER(srv_preview_, "task/preview", &Node::onPreview);
+    INIT_ROS_SERVICE_SERVER(srv_start_, "task/start", &Node::onStart);
+    INIT_ROS_SERVICE_SERVER(srv_pick_, "task/pick", &Node::onPick);
+    INIT_ROS_SERVICE_SERVER(srv_advance_, "task/advance", &Node::onAdvance);
+    INIT_ROS_SERVICE_SERVER(srv_retreat_, "task/retreat", &Node::onRetreat);
+    INIT_ROS_SERVICE_SERVER(srv_close_, "task/close_jaw", &Node::onClose);
+    INIT_ROS_SERVICE_SERVER(srv_open_, "task/open_jaw", &Node::onOpen);
+    INIT_ROS_SERVICE_SERVER(srv_home_, "task/home", &Node::onHome);
+    INIT_ROS_SERVICE_SERVER(srv_stop_, "task/stop", &Node::onStop);
+
+    INIT_ROS_SERVICE_CLIENT(cli_move_q_, Srv_SetFloat32Array, "ctrl/move_q");
+    INIT_ROS_SERVICE_CLIENT(cli_move_grasp_, Srv_SetFloat32Array, "ctrl/move_grasp");
+    INIT_ROS_SERVICE_CLIENT(cli_return_, Srv_Trigger, "ctrl/return");
+    INIT_ROS_SERVICE_CLIENT(cli_ctrl_stop_, Srv_Trigger, "ctrl/stop");
+    INIT_ROS_SERVICE_CLIENT(cli_close_jaw_, Srv_Trigger, "cmd/close_jaw");
+    INIT_ROS_SERVICE_CLIENT(cli_open_jaw_, Srv_Trigger, "cmd/open_jaw");
+
+    if (!g_.ok()) {
+        LOG_ERROR("[task] the arm geometry is unusable (%s); no hold can be planned",
+                  g_.fault());
+    }
+
+    LOG_INFO("[task] standoff %.3f m, approach window %.0f deg, depth %.3f..%.3f m, %s",
+             p_.ask.standoff_m, p_.ask.max_approach_dev_deg, p_.ask.depth_min_m,
+             p_.ask.depth_max_m,
+             p_.auto_sequence ? "sequencing the whole pick" : "one leg per call");
+
+    loadField(field_path);
+}
+
+// The same field n_ctrl checks paths against, opened by the same code. Both log
+// the digest, so the two disagreeing about which world they are in shows up in
+// the log.
+void Node::loadField(const std::string &path) {
+    const std::vector<check::Note> notes =
+            check::openScene(path, jaws_, g_, ctrl::restPose(g_.params(), limits_), field_, body_);
+
+    for (size_t i = 0; i < notes.size(); ++i) {
+        switch (notes[i].level) {
+        case check::Note::ERROR:
+            LOG_ERROR("[task] %s", notes[i].text.c_str());
+            break;
+        case check::Note::WARN:
+            LOG_WARN("[task] %s", notes[i].text.c_str());
+            break;
+        default:
+            LOG_INFO("[task] %s", notes[i].text.c_str());
+            break;
+        }
+    }
+}
+
+void Node::onStates(const sensor_msgs::JointState::ConstPtr &msg) {
+    kine::Joints q;
+    if (!ctrl::readJointState(g_.params(), *msg, q)) {
+        return;  // not the driver's joint_states
+    }
+
+    std::lock_guard<std::mutex> lock(mtx_);
+    q_ = q;
+    seen_ = true;
+}
+
+void Node::onCtrlState(const Msg_UInt8::ConstPtr &msg) {
+    ctrl_state_ = static_cast<ctrl::State>(msg->data);
+    ctrl_seen_  = true;
+}
+
+bool Node::snapshot(kine::Joints &q) {
+    std::lock_guard<std::mutex> lock(mtx_);
+    q = q_;
+    return seen_;
+}
+
+void Node::enter(Step s) {
+    if (step_ == s) {
+        return;
+    }
+    step_        = s;
+    leg_began_s_ = reach::nowSec();
+    LOG_INFO("[task] %s", name(s));
+}
+
+bool Node::plan(const std::vector<float> &data, std::string &why) {
+    kine::Joints seed;
+    if (!snapshot(seed)) {
+        why = "no joint_states yet, so there is nothing to plan from";
+        return false;
+    }
+
+    std::vector<Candidate> candidates;
+    if (!readCandidates(data, candidates, why)) {
+        return false;
+    }
+    if (!why.empty()) {
+        LOG_WARN("[task] %s", why.c_str());  // the 6-or-9 ambiguity
+        why.clear();
+    }
+
+    // Every candidate gets a real solve. Ranking is not a heuristic applied
+    // before anything was solved -- it is the cost of the postures that came back.
+    last_       = choose(g_, *body_, field_, p_.ask, candidates, seed, scratch_);
+    candidates_ = candidates;
+
+    report();
+
+    if (!last_.found) {
+        why      = summarise(last_, candidates_);
+        planned_ = false;
+        return false;
+    }
+
+    hold_    = last_.hold;
+    planned_ = true;
+    why      = summarise(last_, candidates_);
+    return true;
+}
+
+void Node::publishChosen() {
+    Msg_PoseArray msg;
+    msg.header.stamp    = ROS_TIME_NOW();
+    msg.header.frame_id = "arm_base";
+    if (!planned_) {
+        PUBLISH_ROS(pub_chosen_, msg);  // empty clears the last one
+        return;
+    }
+
+    // Turn +x onto the approach; the shortest rotation is enough to aim an arrow.
+    const kine::Vec3 a = kine::unit(hold_.approach);
+    const kine::Vec3 axis{0.0, -a.z, a.y};              // cross({1,0,0}, a)
+    const double     s = kine::norm(axis);
+    const double     c = a.x;
+
+    double qx = 0.0, qy = 0.0, qz = 0.0, qw = 1.0;
+    if (s > 1e-9) {
+        const double half = std::atan2(s, c) * 0.5;
+        const double k    = std::sin(half) / s;
+        qx = axis.x * k;
+        qy = axis.y * k;
+        qz = axis.z * k;
+        qw = std::cos(half);
+    } else if (c < 0.0) {
+        qy = 1.0;                                        // a points at -x
+        qw = 0.0;
+    }
+
+    const kine::Vec3 at[2] = {hold_.standoff_point, hold_.point};
+    msg.poses.resize(2);
+    for (int i = 0; i < 2; ++i) {
+        msg.poses[i].position.x    = at[i].x;
+        msg.poses[i].position.y    = at[i].y;
+        msg.poses[i].position.z    = at[i].z;
+        msg.poses[i].orientation.x = qx;
+        msg.poses[i].orientation.y = qy;
+        msg.poses[i].orientation.z = qz;
+        msg.poses[i].orientation.w = qw;
+    }
+    PUBLISH_ROS(pub_chosen_, msg);
+}
+
+void Node::report() {
+    for (size_t i = 0; i < candidates_.size(); ++i) {
+        const bool held = last_.per[i] == check::Block::NONE;
+        LOG_INFO("[task]   %3u  (%7.3f, %7.3f, %7.3f)  %-12s %s",
+                 static_cast<uint32_t>(i), candidates_[i].point.x, candidates_[i].point.y,
+                 candidates_[i].point.z, check::name(last_.per[i]),
+                 held && i == last_.index ? "<- chosen" : "");
+    }
+    LOG_INFO("[task] %s", summarise(last_, candidates_).c_str());
+    publishChosen();
+
+    if (last_.found && !field_.ok()) {
+        LOG_WARN("[task] no obstacle field loaded, so nothing here was tested against the "
+                 "world -- these verdicts are reach, limits and the floor only.");
+    }
+}
+
+bool Node::moveToPose(const kine::Joints &goal, std::string &why) {
+    Srv_SetFloat32Array srv;
+    srv.request.data = ctrl::encodeJoints(goal);
+
+    if (!CALL_SRV_ROS(cli_move_q_, srv)) {
+        why = "ctrl/move_q did not answer";
+        return false;
+    }
+    if (!srv.response.success) {
+        why = "the move was refused; n_ctrl's log says why";
+        return false;
+    }
+    return true;
+}
+
+// Everything but the target is the same for every leg of one grasp: the branch
+// and the roll are what the gate solved, and holding them is the point.
+bool Node::moveAlong(const kine::Vec3 &to, std::string &why) {
+    ctrl::Leg leg;
+    leg.target     = to;
+    leg.q_wrist    = hold_.joints[kine::WRIST];
+    leg.facing_out = hold_.facing_out;
+    leg.elbow_up   = hold_.elbow_up;
+
+    Srv_SetFloat32Array srv;
+    srv.request.data = ctrl::encodeLeg(leg);
+
+    if (!CALL_SRV_ROS(cli_move_grasp_, srv)) {
+        why = "ctrl/move_grasp did not answer";
+        return false;
+    }
+    if (!srv.response.success) {
+        why = "the move was refused; n_ctrl's log says why";
+        return false;
+    }
+    return true;
+}
+
+bool Node::jaw(bool shut, std::string &why) {
+    Srv_Trigger         srv;
+    ROS_SERVICE_CLIENT &cli = shut ? cli_close_jaw_ : cli_open_jaw_;
+    if (!CALL_SRV_ROS(cli, srv)) {
+        why = shut ? "cmd/close_jaw did not answer" : "cmd/open_jaw did not answer";
+        return false;
+    }
+    return true;
+}
+
+bool Node::goStandoff(std::string &why) {
+    if (!planned_) {
+        why = "nothing planned; call task/plan first";
+        return false;
+    }
+    // The posture, not the point: this is the pose the gate cleared.
+    if (!moveToPose(hold_.standoff, why)) {
+        return false;
+    }
+    enter(Step::TO_STANDOFF);
+    return true;
+}
+
+bool Node::goGrasp(std::string &why) {
+    if (!planned_) {
+        why = "nothing planned; call task/plan first";
+        return false;
+    }
+    // Straight in, so the jaws travel down the approach instead of swinging
+    // through the handle on an arc, and on the branch and roll the gate solved.
+    if (!moveAlong(hold_.point, why)) {
+        return false;
+    }
+    enter(Step::ADVANCING);
+    return true;
+}
+
+bool Node::goStandoffBack(std::string &why) {
+    if (!planned_) {
+        why = "nothing planned";
+        return false;
+    }
+    if (!moveAlong(hold_.standoff_point, why)) {
+        return false;
+    }
+    enter(Step::RETREATING);
+    return true;
+}
+
+void Node::tick() {
+    Msg_UInt8 msg;
+    msg.data = static_cast<uint8_t>(step_);
+    PUBLISH_ROS(pub_step_, msg);
+
+    const bool running = step_ == Step::TO_STANDOFF || step_ == Step::ADVANCING
+                         || step_ == Step::RETREATING;
+    if (!running || !ctrl_seen_) {
+        return;
+    }
+
+    if (reach::nowSec() - leg_began_s_ > p_.leg_timeout_s) {
+        LOG_ERROR("[task] the leg did not finish in %.0f s; giving up on it", p_.leg_timeout_s);
+        enter(Step::FAILED);
+        return;
+    }
+
+    // n_ctrl owns whether a leg finished; this only reacts to what it reports.
+    if (ctrl_state_ == ctrl::State::STALLED || ctrl_state_ == ctrl::State::PILLOW
+        || ctrl_state_ == ctrl::State::ABORTED) {
+        LOG_ERROR("[task] the arm stopped mid-leg (%s), so the pick is off. The outbound path is "
+                  "kept: task/home will back out.", ctrl::name(ctrl_state_));
+        enter(Step::FAILED);
+        return;
+    }
+    if (ctrl_state_ != ctrl::State::REACHED) {
+        return;
+    }
+
+    std::string why;
+    switch (step_) {
+    case Step::TO_STANDOFF:
+        enter(Step::AT_STANDOFF);
+        if (p_.auto_sequence && !goGrasp(why)) {
+            LOG_ERROR("[task] advance: %s", why.c_str());
+            enter(Step::FAILED);
+        }
+        break;
+
+    case Step::ADVANCING:
+        enter(Step::HOLDING);
+        if (p_.auto_sequence && !jaw(true, why)) {
+            LOG_ERROR("[task] close: %s", why.c_str());
+            enter(Step::FAILED);
+        }
+        break;
+
+    case Step::RETREATING:
+        enter(Step::DONE);
+        break;
+
+    default:
+        break;
+    }
+}
+
+bool Node::onPlan(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res) {
+    std::string why;
+    res.success = plan(req.data, why);
+    if (!res.success) {
+        LOG_WARN("[task] plan: %s", why.c_str());
+    }
+    return true;
+}
+
+// The evaluation without the commitment. SetFloat32Array carries no message
+// back, so the summary comes through here instead of out of task/plan.
+bool Node::onPreview(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    if (candidates_.empty()) {
+        res.success = false;
+        res.message = "nothing to preview; send candidates to task/plan first";
+        return true;
+    }
+
+    report();
+    res.success = last_.found;
+    res.message = summarise(last_, candidates_);
+    return true;
+}
+
+bool Node::onPick(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res) {
+    std::string why;
+    if (!plan(req.data, why)) {
+        LOG_WARN("[task] pick: %s", why.c_str());
+        res.success = false;
+        return true;
+    }
+    res.success = goStandoff(why);
+    if (!res.success) {
+        LOG_WARN("[task] pick: %s", why.c_str());
+    }
+    return true;
+}
+
+// Everything after a preview. task/pick still exists for the one-shot, but once
+// you have looked at a plan you should not have to hand it the candidates again
+// just to say yes.
+bool Node::onStart(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::string why;
+    res.success = goStandoff(why);
+    res.message = res.success ? "moving to the standoff" : why;
+    if (!res.success) {
+        LOG_WARN("[task] start: %s", why.c_str());
+    }
+    return true;
+}
+
+bool Node::onAdvance(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::string why;
+    res.success = goGrasp(why);
+    res.message = res.success ? "closing in on the handle" : why;
+    if (!res.success) {
+        LOG_WARN("[task] advance: %s", why.c_str());
+    }
+    return true;
+}
+
+bool Node::onRetreat(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::string why;
+    res.success = goStandoffBack(why);
+    res.message = res.success ? "backing out to the standoff" : why;
+    if (!res.success) {
+        LOG_WARN("[task] retreat: %s", why.c_str());
+    }
+    return true;
+}
+
+bool Node::onClose(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::string why;
+    res.success = jaw(true, why);
+    res.message = res.success ? "jaw closing" : why;
+    if (res.success) {
+        enter(Step::HOLDING);
+    }
+    return true;
+}
+
+bool Node::onOpen(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::string why;
+    res.success = jaw(false, why);
+    res.message = res.success ? "jaw opening" : why;
+    return true;
+}
+
+bool Node::onHome(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    Srv_Trigger srv;
+    res.success = CALL_SRV_ROS(cli_return_, srv) && srv.response.success;
+    res.message = res.success ? "retracing the way out" : "ctrl/return refused";
+    if (res.success) {
+        enter(Step::IDLE);
+        planned_ = false;
+    }
+    return true;
+}
+
+bool Node::onStop(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    Srv_Trigger srv;
+    CALL_SRV_ROS(cli_ctrl_stop_, srv);
+    enter(Step::IDLE);
+    planned_    = false;
+    res.success = true;
+    res.message = "stopped";
+    LOG_WARN("[task] stopped; the plan is dropped");
+    return true;
+}
+
+}  // namespace task

@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<robot name="alpha5" xmlns:xacro="http://ros.org/wiki/xacro">
+
+    <link name="arm_base"/>
+
+    <xacro:include filename="$(find n_desc)/alpha.urdf.xacro"/>
+
+    <xacro:alpha_urdf parent="arm_base" prefix="" description_package="n_desc">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:alpha_urdf>
+
+</robot>

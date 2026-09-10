@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Every tunable lives in this file, port and baud included. -->
+    <arg name="config" default="$(find n_conf)/config/arm.yaml"/>
+
+    <arg name="port"          default=""/>
+
+    <arg name="foxglove"      default="true"/>
+    <arg name="foxglove_port" default="8765"/>
+    <arg name="viz"           default="true"/>
+
+    <node name="n_driver" pkg="n_driver" type="n_driver_node" output="screen">
+        <param name="config" type="str" value="$(arg config)"/>
+        <param name="port"   type="str" value="$(arg port)"/>
+    </node>
+
+    <include if="$(arg viz)" file="$(find n_driver)/launch/viz.launch"/>
+
+    <include if="$(arg foxglove)" file="$(find n_driver)/launch/foxglove.launch">
+        <arg name="port" value="$(arg foxglove_port)"/>
+    </include>
+</launch>

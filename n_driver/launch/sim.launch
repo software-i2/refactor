@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="config" default="$(find n_conf)/config/arm.yaml"/>
+
+    <arg name="foxglove"      default="true"/>
+    <arg name="foxglove_port" default="8765"/>
+    <arg name="viz"           default="true"/>
+
+    <include file="$(find n_driver)/launch/driver.launch">
+        <arg name="config"        value="$(arg config)"/>
+        <arg name="port"          value="sim"/>
+        <arg name="foxglove"      value="$(arg foxglove)"/>
+        <arg name="foxglove_port" value="$(arg foxglove_port)"/>
+        <arg name="viz"           value="$(arg viz)"/>
+    </include>
+</launch>

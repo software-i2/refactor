@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>n_kine</name>
+  <version>0.0.0</version>
+  <description>Forward and inverse kinematics for the Reach Alpha 5. No ROS.</description>
+  <maintainer email="bolin@todo.todo">nknight</maintainer>
+  <license>TODO</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>n_conf</depend>
+</package>

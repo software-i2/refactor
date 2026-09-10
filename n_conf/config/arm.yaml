@@ -1,0 +1,116 @@
+# Copyright by BeeX [2026]
+#
+# EVERY TUNABLE IN THE ARM STACK.
+# Lengths are metres, angles degrees, times seconds.
+
+world:
+  floor_z_m: -1.0e-6
+  obstacle_field: "/mnt/d/beex/arm_ws/data/field.bin"
+
+
+arm:
+  # Link transforms in the arm plane, from alpha_description/xacro/alpha.urdf.xacro.
+  base_to_e_z: 0.0140       # base -> axis_e
+  e_to_d_x: -0.02           # axis_e -> axis_d
+  e_to_d_z: 0.0330
+  d_to_c_x: -0.04           # axis_d -> axis_c, the upper arm
+  d_to_c_z: -0.1453
+  d_to_c_yaw_deg: 180.0     # must be 0 or 180; 180 reverses the elbow
+  c_to_b_x: 0.02            # axis_c -> axis_b, the forearm
+  c_to_b_z: 0.0330
+  b_to_mount: 0.09975       # pivot -> tool mount
+  mount_to_throat: 0.0400   # mount -> throat
+  mount_to_tip: 0.0969      # mount -> jaw tips
+
+  # Jaw hinge roll when the wrist reads zero.
+  hinge_offset_deg: -60.0
+
+  # Kinematic limits, per joint.
+  limit_lo_deg: {base: -2.403, shoulder: 0.0, elbow: 0.0, wrist: -184.5}
+  limit_hi_deg: {base: 349.5, shoulder: 200.0, elbow: 184.5, wrist: 0.0}
+
+  # q_kin = sign * (wire - zero_offset) 
+  zero_offset_deg: {base: 2.403, shoulder: 0.0, elbow: 0.0, wrist: 0.0}
+  direction_sign: {base: 1.0, shoulder: 1.0, elbow: 1.0, wrist: -1.0}
+
+  # Cost of moving each joint, for choosing between IK branches.
+  weight: {base: 10.0, shoulder: 1.0, elbow: 1.0, wrist: 1.0}
+
+jaws:
+  palm_radius_m: 0.020
+  palm_length_m: 0.00975
+
+  hinge_xyz: [0.0, 0.0155, 0.0069]
+  blade_size: [0.012, 0.030, 0.090]     # hinge, closing, approach
+  blade_origin: [0.0, -0.008, 0.045]
+  open_mm: 8.0
+
+  # Blade that must still lie beyond the grasp point. Without it the search
+  # "solves" every hold by grasping at the fingertips, holding nothing.
+  grip_margin_m: 0.020
+
+driver:
+  port: "/dev/ttyUSB0"     
+  baud: 115200
+  rate_hz: 10.0
+
+  climate_period_s: 15.0    # one joint's climate per period, round robin
+  log_period_s: 20.0        # console cadence; a mode change always prints
+  jog_timeout_s: 0.5        # a jog not re-sent within this is zeroed
+
+  reply_timeout_s: 0.05     # how long to wait for a position or mode answer
+  climate_timeout_s: 0.1
+  climate_max_miss: 3       # give up on a climate field after this many silences
+
+  sim_joint_speed: 0.5      # sim only, wire units per second
+  sim_jaw_speed: 10.0
+
+  limits:
+    jaw:      {min: 1.30, max: 13.30, rest: 1.30, max_vel: 10.0}
+    wrist:    {min: 0.00, max: 184.5, rest: 0.00, max_vel: 28.6479}
+    elbow:    {min: 0.00, max: 184.5, rest: 0.00, max_vel: 28.6479}
+    shoulder: {min: 0.00, max: 200.0, rest: 90.0, max_vel: 28.6479}
+    base:     {min: 0.00, max: 349.6, rest: 0.00, max_vel: 28.6479}
+
+ctrl:
+  rate_hz: 5.0
+
+  max_joint_step_deg: 1.0   # biggest joint move in one waypoint
+  line_step_m: 0.005        # knot spacing on a straight-line move
+
+  goal_tolerance_deg: 1.5
+
+  # joint_states older than this cannot say whether the arm is following, so
+  # pillow detection is suspended rather than tripping on stale numbers.
+  feedback_timeout_s: 0.5
+  arrival_timeout_s: 15.0   # then release to standby and report STALLED
+
+  pillow_stop: true
+  pillow_min_step_deg: 0.2
+  pillow_follow_frac: 0.25
+  pillow_strikes: 3
+
+task:
+  rate_hz: 5.0
+
+  # How far back along the approach the pre-grasp sits.
+  standoff_m: 0.08
+
+  # Largest angle the arm's own approach may sit from the one asked for.
+  max_approach_dev_deg: 20.0
+
+  # Where along the claw to take hold. Searched deepest first, because the gap
+  # between the blades widens down the claw.
+  depth_min_m: 0.040
+  depth_max_m: 0.075
+  depth_step_m: 0.005
+
+  # Samples along the straight run from standoff to hold, when judging whether
+  # that run is clear.
+  leg_samples: 8
+
+  # Run the whole pick unattended, or stop after each leg for the operator.
+  auto_sequence: false
+
+  # A leg that has not finished by now has gone wrong; give up on it.
+  leg_timeout_s: 150.0

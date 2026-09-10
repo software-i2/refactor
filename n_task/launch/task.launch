@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- The same file n_ctrl reads, so the two cannot describe different arms. -->
+    <arg name="config" default="$(find n_conf)/config/arm.yaml"/>
+
+    <node name="n_task" pkg="n_task" type="n_task_node" output="screen">
+        <param name="config" type="str" value="$(arg config)"/>
+    </node>
+</launch>

@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>n_ctrl</name>
+  <version>0.0.0</version>
+  <description>Cartesian moves and trajectory execution for the Reach Alpha 5</description>
+  <maintainer email="bolin@todo.todo">nknight</maintainer>
+  <license>TODO</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>n_kine</depend>
+  <depend>n_check</depend>
+  <depend>n_driver</depend>
+  <depend>bx_msgs</depend>
+  <depend>roscpp</depend>
+  <depend>rospy</depend>
+  <depend>roslib</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>tf2_msgs</depend>
+  <depend>n_conf</depend>
+</package>

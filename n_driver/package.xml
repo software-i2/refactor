@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>n_driver</name>
+  <version>0.0.0</version>
+  <description>reach alpha 5 driver </description>
+  <maintainer email="bolin@todo.todo">nknight</maintainer>
+  <license>TODO</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>bx_msgs</depend>
+  <depend>roscpp</depend>
+  <depend>rospy</depend>
+  <depend>roslib</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>tf2_msgs</depend>
+
+  <exec_depend>foxglove_bridge</exec_depend>
+  <exec_depend>n_desc</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <depend>n_conf</depend>
+</package>

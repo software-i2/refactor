@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Every tunable lives in this file. Copy it and point here to change any. -->
+    <arg name="config" default="$(find n_conf)/config/arm.yaml"/>
+
+    <node name="n_ctrl" pkg="n_ctrl" type="n_ctrl_node" output="screen">
+        <param name="config" type="str" value="$(arg config)"/>
+    </node>
+</launch>

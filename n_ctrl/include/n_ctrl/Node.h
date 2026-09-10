@@ -1,0 +1,124 @@
+// Copyright by BeeX [2026]
+
+#ifndef N_CTRL_NODE_H
+#define N_CTRL_NODE_H
+
+#include <bx_msgs/RosBindings.hpp>
+#include <n_ctrl/Bridge.h>
+#include <n_ctrl/Exec.h>
+#include <n_ctrl/Trail.h>
+#include <sensor_msgs/JointState.h>
+
+#include <memory>
+#include <mutex>
+#include <string>
+
+namespace ctrl {
+
+class Node {
+public:
+    // Everything already loaded and checked by main: the geometry, the jaws and
+    // the policy. The node does not read config itself, so there is no second
+    // path by which n_ctrl and n_task could end up describing different arms.
+    Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
+         const reach::Limits &limits, const std::string &field_path);
+
+    void tick();
+
+private:
+    // Publishes each waypoint to the driver.
+    class TopicSink : public Sink {
+    public:
+        void send(const kine::Joints &q) override;
+        void release() override;
+
+        DECLARE_ROS_PUBLISHER(pub_target_, Msg_Float32MultiArray)
+        DECLARE_ROS_SERVICE_CLIENT(srv_standby_, Srv_Trigger)
+        kine::Params params;
+    };
+
+    void onStates(const sensor_msgs::JointState::ConstPtr &msg);
+
+    bool onMoveJ(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res);
+    bool onMoveL(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res);
+    bool onMoveJRel(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res);
+    bool onMoveLRel(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res);
+    bool onMoveQ(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res);
+    bool onMoveGrasp(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res);
+    bool onStop(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
+    bool onReturn(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
+    bool onRest(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
+
+    // All four move services differ only by these two flags.
+    bool handle(Srv_SetFloat32Array_Request &req,
+                Srv_SetFloat32Array_Response &res,
+                bool straight,
+                bool relative,
+                const char *what);
+
+    Move move(const kine::Vec3 &v, bool straight, bool relative);
+
+    // Straight to a posture. Used for the leg that puts the arm on the standoff,
+    // where what matters is not the point but ending in the exact posture the
+    // grasp was solved on.
+    Move moveJoints(const kine::Joints &goal, bool record = true);
+
+    // A line flown on a named branch at a named roll. The grasp gate cleared the
+    // field for one posture; any other puts the jaws somewhere it never looked.
+    Move moveGrasp(const Leg &leg);
+
+    // Consistent copy of the latest feedback; false until the first arrives.
+    bool snapshot(kine::Joints &q);
+    // `record` false leaves the trail alone: a retrace is not itself part of
+    // the outbound path, and recording it would send the next return back out.
+    void run(const Path &path, const kine::Joints &from, Move &out, bool record = true);
+    void report(const Move &m, const char *what);
+    void publishPose(const kine::Joints &q);
+    void publishBody(const kine::Joints &q);
+
+    DECLARE_ROS_SUBSCRIBER(sub_states_, sensor_msgs::JointState)
+    DECLARE_ROS_PUBLISHER(pub_state_, Msg_UInt8)
+    DECLARE_ROS_PUBLISHER(pub_pose_, Msg_PoseArray)
+    DECLARE_ROS_PUBLISHER(pub_body_, Msg_MarkerArray)
+    DECLARE_ROS_SERVICE_SERVER(srv_move_j_, Srv_SetFloat32Array)
+    DECLARE_ROS_SERVICE_SERVER(srv_move_l_, Srv_SetFloat32Array)
+    DECLARE_ROS_SERVICE_SERVER(srv_move_j_rel_, Srv_SetFloat32Array)
+    DECLARE_ROS_SERVICE_SERVER(srv_move_l_rel_, Srv_SetFloat32Array)
+    DECLARE_ROS_SERVICE_SERVER(srv_move_q_, Srv_SetFloat32Array)
+    DECLARE_ROS_SERVICE_SERVER(srv_move_grasp_, Srv_SetFloat32Array)
+    DECLARE_ROS_SERVICE_SERVER(srv_stop_, Srv_Trigger)
+    DECLARE_ROS_SERVICE_SERVER(srv_return_, Srv_Trigger)
+    DECLARE_ROS_SERVICE_SERVER(srv_rest_, Srv_Trigger)
+
+    void loadField(const std::string &path);
+
+    Params        p_;
+    kine::Geom    g_;
+    check::Jaws   jaws_;
+    reach::Limits limits_;
+
+    // Nothing loaded blocks nothing, so no field means floor and limits only.
+    // The body is built after the field, because how finely its blades are
+    // sampled is fixed by the field's voxel size rather than set by hand.
+    check::Field                 field_;
+    std::unique_ptr<check::Body> body_;
+    std::vector<kine::Vec3>      scratch_;
+    std::vector<kine::Vec3>      viz_scratch_;
+
+    TopicSink  sink_;
+    Exec       exec_;
+    Trail      trail_;
+
+    // onStates runs on the spinner, tick on the main loop.
+    std::mutex   mtx_;
+    kine::Joints q_{};
+    bool         seen_        = false;
+    double       last_state_s_ = 0.0;
+
+    State logged_    = State::IDLE;
+    bool  retracing_ = false;
+};
+
+}  // namespace ctrl
+
+#endif  // N_CTRL_NODE_H
