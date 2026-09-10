@@ -40,7 +40,7 @@ Node::Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
     INIT_ROS_PUBLISHER(pub_step_, Msg_UInt8, "task/step", 1);
     INIT_ROS_PUBLISHER(pub_chosen_, Msg_PoseArray, "task/chosen", 1);
     INIT_ROS_SUBSCRIBER(sub_states_, "joint_states", 1, &Node::onStates);
-    INIT_ROS_SUBSCRIBER(sub_ctrl_, "ctrl/state", 1, &Node::onCtrlState);
+    INIT_ROS_SUBSCRIBER(sub_ctrl_, "ctrl/state", 10, &Node::onCtrlState);
 
     INIT_ROS_SERVICE_SERVER(srv_plan_, "task/plan", &Node::onPlan);
     INIT_ROS_SERVICE_SERVER(srv_preview_, "task/preview", &Node::onPreview);
