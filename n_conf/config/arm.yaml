@@ -84,7 +84,7 @@ task:
   rate_hz: 5.0
 
   standoff_m: 0.08
-  max_approach_dev_deg: 20.0
+  max_approach_dev_deg: 30.0
 
   depth_min_m: 0.040
   depth_max_m: 0.065
