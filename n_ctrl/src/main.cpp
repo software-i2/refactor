@@ -42,10 +42,10 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    LOG_INFO("[ctrl] config %s\n%s", config.c_str(), doc.effective().c_str());
+    LOG_INFO("[ctrl] config loaded: %s", config.c_str());
 
     ctrl::Node node(p, arm, jaws, limits, field_path);
-    LOG_INFO("[ctrl] ready");
+    LOG_INFO("[ctrl] node started");
 
     // Run ROS callbacks and the control loop concurrently.
     ROS_ASYNC_SPIN(2)

@@ -51,10 +51,10 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    LOG_INFO("[task] config %s\n%s", config.c_str(), doc.effective().c_str());
+    LOG_INFO("[task] config loaded: %s", config.c_str());
 
     task::Node node(p, motion, arm, jaws, limits, field_path);
-    LOG_INFO("[task] ready");
+    LOG_INFO("[task] node started");
 
     ROS_ASYNC_SPIN(2)
 

@@ -1,5 +1,6 @@
 // Copyright by BeeX [2026]
 
+#include <bx_msgs/RosBindings.hpp>
 #include <n_driver/Serial.h>
 
 #include <fcntl.h>
@@ -63,7 +64,6 @@ Serial::Serial(const std::string &device, unsigned int baud) {
     }
 
     tcflush(fd_, TCIOFLUSH);
-    std::cout << "[Serial] " << device << " open at " << baud << " baud." << std::endl;
 }
 
 Serial::~Serial() {

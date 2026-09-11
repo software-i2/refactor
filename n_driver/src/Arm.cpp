@@ -1,5 +1,6 @@
 // Copyright by BeeX [2026]
 
+#include <bx_msgs/RosBindings.hpp>
 #include <n_driver/Arm.h>
 #include <n_driver/Time.h>
 
@@ -152,16 +153,14 @@ bool Arm::ping(int tries) {
             Packet pkt;
             if (ask(DEVICE[WRIST], Pkt::MODE, 0.1, pkt) && !pkt.data.empty() &&
                 pkt.data[0] == static_cast<uint8_t>(Mode::VELOCITY)) {
-                std::cout << "[Arm] connected, wrist answering." << std::endl;
                 return true;
             }
         }
 
-        std::cout << "[Arm] no answer, attempt " << (i + 1) << " of " << tries << "." << std::endl;
         std::this_thread::sleep_for(std::chrono::seconds(2));
     }
 
-    std::cerr << "[Arm] arm did not answer." << std::endl;
+    LOG_ERROR("[Arm] arm did not answer.");
     return false;
 }
 

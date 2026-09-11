@@ -1,5 +1,6 @@
 // Copyright by BeeX [2026]
 
+#include <bx_msgs/RosBindings.hpp>
 #include <n_driver/Sim.h>
 #include <n_driver/Time.h>
 
@@ -28,7 +29,6 @@ Sim::Sim(double joint_speed, double jaw_speed, const Limits &limits)
         joints_[j].position = toWireRad(j, limits_.rest_pos[j]);
         joints_[j].target   = joints_[j].position;
     }
-    std::cout << "[Sim] arm simulated, starting at rest." << std::endl;
 }
 
 bool Sim::ok() const { return true; }

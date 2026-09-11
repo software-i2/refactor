@@ -39,12 +39,12 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    LOG_INFO("[arm] config %s\n%s", config.c_str(), doc.effective().c_str());
+    LOG_INFO("[arm] config loaded: %s", config.c_str());
 
     std::string port_override;
     GET_ROS_PARAM("~port", port_override, port_override);
     if (!port_override.empty() && port_override != p.port) {
-        LOG_INFO("[arm] ~port overrides driver.port: %s -> %s", p.port.c_str(),
+        LOG_WARN("[arm] ~port overrides driver.port: %s -> %s", p.port.c_str(),
                  port_override.c_str());
         p.port = port_override;
     }
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     }
 
     reach::Node node(arm, p);
-    LOG_INFO("[arm] driver ready at %.1f Hz", p.rate_hz);
+    LOG_INFO("[arm] driver initialized at %.1f Hz", p.rate_hz);
 
     ROS_ASYNC_SPIN(2)
 

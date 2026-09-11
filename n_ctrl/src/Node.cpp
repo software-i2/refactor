@@ -145,18 +145,6 @@ Node::Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
     if (!g_.ok()) {
         LOG_ERROR("[ctrl] the arm geometry is unusable (%s); every move will be refused",
                   g_.fault());
-    } else {
-        LOG_INFO("[ctrl] throat reach %.3f .. %.3f m, %.1f Hz, %.2f deg per waypoint",
-                 g_.reachMin(g_.throatAlong()), g_.reachMax(g_.throatAlong()),
-                 p_.rate_hz, p_.max_joint_step_deg);
-
-        const kine::Params &a = g_.params();
-        LOG_INFO("[ctrl] calibration: zero offsets %.3f %.3f %.3f %.3f deg, "
-                 "signs %+.0f %+.0f %+.0f %+.0f",
-                 a.zero_offset_deg[kine::BASE], a.zero_offset_deg[kine::SHOULDER],
-                 a.zero_offset_deg[kine::ELBOW], a.zero_offset_deg[kine::WRIST],
-                 a.direction_sign[kine::BASE], a.direction_sign[kine::SHOULDER],
-                 a.direction_sign[kine::ELBOW], a.direction_sign[kine::WRIST]);
     }
 
     loadField(field_path);
@@ -175,7 +163,6 @@ void Node::loadField(const std::string &path) {
             LOG_WARN("[ctrl] %s", notes[i].text.c_str());
             break;
         default:
-            LOG_INFO("[ctrl] %s", notes[i].text.c_str());
             break;
         }
     }
@@ -456,9 +443,6 @@ void Node::report(const Move &m, const char *what) {
                  g_.reachMin(g_.throatAlong()), g_.reachMax(g_.throatAlong()));
         return;
     }
-    LOG_INFO("[ctrl] %s: (%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f), %u waypoints, ~%.1f s. %s",
-             what, m.from.x, m.from.y, m.from.z, m.to.x, m.to.y, m.to.z,
-             static_cast<uint32_t>(m.waypoints), m.duration_s, m.note.c_str());
 }
 
 bool Node::handle(Srv_SetFloat32Array_Request &req,

@@ -78,9 +78,6 @@ void Node::rampTick() {
         moving = true;
     }
 
-    if (ramping_ && !moving) {
-        LOG_INFO("[arm] rest pose reached");
-    }
     ramping_ = moving;
 }
 
@@ -185,8 +182,6 @@ void Node::log() {
         std::snprintf(buf, sizeof(buf), "%02X ", mode_[j]);
         line += buf;
     }
-    LOG_INFO("[arm] %s", line.c_str());
-
     logged_mode_ = mode_;
     log_at_      = now;
 }
@@ -289,7 +284,6 @@ bool Node::onVelocity(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Resp
     jog_at_     = nowSec();
     jogging_    = moving;
     res.success = true;
-    LOG_INFO("[arm] set_velocity: %s", moving ? "jogging" : "stopped");
     return true;
 }
 
@@ -304,7 +298,6 @@ bool Node::onJaw(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response 
 
     std::string msg;
     res.success = moveTo(JAW, req.data[0], msg);
-    LOG_INFO("[arm] set_jaw: %s", msg.c_str());
     return true;
 }
 
@@ -312,7 +305,6 @@ bool Node::onOpen(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
     std::lock_guard<std::mutex> lock(mtx_);
 
     res.success = moveTo(JAW, static_cast<float>(p_.jaw_open_mm), res.message);
-    LOG_INFO("[arm] open_jaw: %s", res.message.c_str());
     return true;
 }
 
@@ -320,7 +312,6 @@ bool Node::onClose(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
     std::lock_guard<std::mutex> lock(mtx_);
 
     res.success = moveTo(JAW, p_.limits.min_pos[JAW], res.message);
-    LOG_INFO("[arm] close_jaw: %s", res.message.c_str());
     return true;
 }
 
@@ -339,8 +330,6 @@ bool Node::onRest(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
     }
 
     for (uint32_t j = 0; j < N_JOINTS; ++j) {
-        LOG_INFO("[arm] %s -> %.2f rest (from %.2f, %.1f deg/s)", NAME[j],
-                 p_.limits.rest_pos[j], pos_[j], p_.limits.max_vel[j]);
         goal_[j] = p_.limits.rest_pos[j];
         ramp_[j] = 1;
     }

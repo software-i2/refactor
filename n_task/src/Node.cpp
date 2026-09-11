@@ -60,11 +60,6 @@ Node::Node(const Params &p, const ctrl::Params &motion, const kine::Params &arm,
                   g_.fault());
     }
 
-    LOG_INFO("[task] standoff %.3f m, approach window %.0f deg, depth %.3f..%.3f m, %s",
-             p_.ask.standoff_m, p_.ask.max_approach_dev_deg, p_.ask.depth_min_m,
-             p_.ask.depth_max_m,
-             p_.auto_sequence ? "sequencing the whole pick" : "one leg per call");
-
     loadField(field_path);
 }
 
@@ -82,7 +77,6 @@ void Node::loadField(const std::string &path) {
             LOG_WARN("[task] %s", notes[i].text.c_str());
             break;
         default:
-            LOG_INFO("[task] %s", notes[i].text.c_str());
             break;
         }
     }
@@ -124,7 +118,7 @@ void Node::enter(Step s) {
         ctrl_busy_ = false;
     }
     if (changed) {
-        LOG_INFO("[task] %s", name(s));
+        LOG_INFO("[task] state -> %s", name(s));
     }
 }
 
@@ -205,14 +199,6 @@ void Node::publishChosen() {
 }
 
 void Node::report() {
-    for (size_t i = 0; i < candidates_.size(); ++i) {
-        const bool held = last_.per[i] == check::Block::NONE;
-        LOG_INFO("[task]   %3u  (%7.3f, %7.3f, %7.3f)  %-12s %s",
-                 static_cast<uint32_t>(i), candidates_[i].point.x, candidates_[i].point.y,
-                 candidates_[i].point.z, check::name(last_.per[i]),
-                 held && i == last_.index ? "<- chosen" : "");
-    }
-    LOG_INFO("[task] %s", summarise(last_, candidates_).c_str());
     publishChosen();
 
     if (last_.found && !field_.ok()) {
@@ -278,6 +264,9 @@ bool Node::jaw(bool shut, std::string &why) {
 bool Node::goStandoff(std::string &why) {
     if (!planned_) {
         why = "nothing planned; call task/plan first";
+        return false;
+    }
+    if (!jaw(false, why)) {
         return false;
     }
     // Armed before the call, or a leg n_ctrl finishes quickly reports REACHED
