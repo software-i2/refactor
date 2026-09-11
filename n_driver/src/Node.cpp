@@ -3,6 +3,7 @@
 #include <n_driver/Node.h>
 #include <n_driver/Time.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -32,10 +33,13 @@ Node::Node(std::shared_ptr<Arm> arm, const Params &p) : arm_(std::move(arm)), p_
 }
 
 void Node::tick() {
+    std::lock_guard<std::mutex> lock(mtx_);
+
     for (uint32_t j = 0; j < N_JOINTS; ++j) {
         float pos = 0.0f;
         if (arm_->position(j, pos)) {
-            pos_[j] = pos;
+            pos_[j]     = pos;
+            read_at_[j] = ROS_TIME_NOW();
         }
     }
 
@@ -121,16 +125,36 @@ void Node::publish() {
     }
     PUBLISH_ROS(pub_status_, status);
 
+    // Stamped with the oldest reading it carries, not with now: a joint whose
+    // serial read timed out is still in here, and consumers time out on this.
+    ros::Time oldest = read_at_[0];
+    for (uint32_t j = 1; j < N_JOINTS; ++j) {
+        oldest = std::min(oldest, read_at_[j]);
+    }
+    if (oldest.isZero()) {
+        if (!warned_no_pose_) {
+            warned_no_pose_ = true;
+            for (uint32_t j = 0; j < N_JOINTS; ++j) {
+                if (read_at_[j].isZero()) {
+                    LOG_WARN("[arm] %s has not answered yet, so no joint_states are published "
+                             "and every move will be refused", NAME[j]);
+                }
+            }
+        }
+        return;
+    }
+    warned_no_pose_ = false;
+
     // Wire units, vendor convention: radians, and metres for the jaw.
     Msg_Float32MultiArray joints;
     sensor_msgs::JointState states;
     joints.data.resize(N_JOINTS);
     states.name.resize(N_JOINTS);
     states.position.resize(N_JOINTS);
-    states.header.stamp = ROS_TIME_NOW();
+    states.header.stamp = oldest;
 
     for (uint32_t j = 0; j < N_JOINTS; ++j) {
-        const float wire = toWire(j, pos_[j]) * (j == JAW ? 0.001f : 1.0f);
+        const float wire = toWireRad(j, pos_[j]) * (j == JAW ? 0.001f : 1.0f);
         joints.data[j]     = wire;
         states.name[j]     = URDF_NAME[j];
         states.position[j] = wire;
@@ -185,6 +209,8 @@ bool Node::moveTo(uint32_t j, float pos, std::string &msg) {
 
 // wrist, elbow, shoulder, base_rot. One bad value drops the whole message.
 void Node::onTarget(const Msg_Float32MultiArray_ConstPtr &msg) {
+    std::lock_guard<std::mutex> lock(mtx_);
+
     if (msg->data.size() != N_JOINTS - 1) {
         LOG_WARN("[arm] joint_target wants %u values, got %u",
                  static_cast<uint32_t>(N_JOINTS - 1), static_cast<uint32_t>(msg->data.size()));
@@ -208,6 +234,8 @@ void Node::onTarget(const Msg_Float32MultiArray_ConstPtr &msg) {
 
 // Every joint at once, in published units. Nothing moves unless all five are legal.
 bool Node::onPosition(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res) {
+    std::lock_guard<std::mutex> lock(mtx_);
+
     res.success = false;
     if (req.data.size() != N_JOINTS) {
         LOG_WARN("[arm] set_position wants %u values, got %u",
@@ -234,6 +262,8 @@ bool Node::onPosition(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Resp
 
 // Keeps running until re-sent, zeroed, or the watchdog fires.
 bool Node::onVelocity(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res) {
+    std::lock_guard<std::mutex> lock(mtx_);
+
     res.success = false;
     if (req.data.size() != N_JOINTS) {
         LOG_WARN("[arm] set_velocity wants %u values, got %u",
@@ -264,6 +294,8 @@ bool Node::onVelocity(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Resp
 }
 
 bool Node::onJaw(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res) {
+    std::lock_guard<std::mutex> lock(mtx_);
+
     if (req.data.size() != 1) {
         LOG_WARN("[arm] set_jaw wants 1 value, got %u", static_cast<uint32_t>(req.data.size()));
         res.success = false;
@@ -277,18 +309,35 @@ bool Node::onJaw(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response 
 }
 
 bool Node::onOpen(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> lock(mtx_);
+
     res.success = moveTo(JAW, static_cast<float>(p_.jaw_open_mm), res.message);
     LOG_INFO("[arm] open_jaw: %s", res.message.c_str());
     return true;
 }
 
 bool Node::onClose(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> lock(mtx_);
+
     res.success = moveTo(JAW, p_.limits.min_pos[JAW], res.message);
     LOG_INFO("[arm] close_jaw: %s", res.message.c_str());
     return true;
 }
 
 bool Node::onRest(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> lock(mtx_);
+
+    // The ramp steps out from the measured position, so a joint that has never
+    // reported one would be ramped from a standing zero.
+    for (uint32_t j = 0; j < N_JOINTS; ++j) {
+        if (read_at_[j].isZero()) {
+            LOG_WARN("[arm] rest refused: %s has not reported a position", NAME[j]);
+            res.success = false;
+            res.message = "not every joint has reported a position yet";
+            return true;
+        }
+    }
+
     for (uint32_t j = 0; j < N_JOINTS; ++j) {
         LOG_INFO("[arm] %s -> %.2f rest (from %.2f, %.1f deg/s)", NAME[j],
                  p_.limits.rest_pos[j], pos_[j], p_.limits.max_vel[j]);
@@ -303,6 +352,8 @@ bool Node::onRest(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
 }
 
 bool Node::onStandby(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> lock(mtx_);
+
     cancelRamp();
     for (uint32_t j = 0; j < N_JOINTS; ++j) {
         arm_->standby(j);

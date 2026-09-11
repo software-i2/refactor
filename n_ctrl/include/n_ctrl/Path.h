@@ -7,6 +7,7 @@
 #include <n_check/Field.h>
 #include <n_ctrl/Move.h>
 #include <n_ctrl/Params.h>
+#include <n_kine/Angle.h>
 #include <n_kine/Geom.h>
 #include <n_kine/Ik.h>
 
@@ -21,6 +22,7 @@ namespace ctrl {
 using Path = std::vector<kine::Joints>;
 
 struct Leg {
+    kine::Vec3 start;
     kine::Vec3 target;
     double     q_wrist    = kine::NONE;
     bool       facing_out = true;
@@ -28,37 +30,58 @@ struct Leg {
 };
 
 inline std::vector<float> encodeLeg(const Leg &leg) {
-    std::vector<float> data(6);
-    data[0] = static_cast<float>(leg.target.x);
-    data[1] = static_cast<float>(leg.target.y);
-    data[2] = static_cast<float>(leg.target.z);
-    data[3] = static_cast<float>(leg.q_wrist);
-    data[4] = leg.facing_out ? 1.0f : 0.0f;
-    data[5] = leg.elbow_up ? 1.0f : 0.0f;
+    std::vector<float> data(9);
+    data[0] = static_cast<float>(leg.start.x);
+    data[1] = static_cast<float>(leg.start.y);
+    data[2] = static_cast<float>(leg.start.z);
+    data[3] = static_cast<float>(leg.target.x);
+    data[4] = static_cast<float>(leg.target.y);
+    data[5] = static_cast<float>(leg.target.z);
+    data[6] = static_cast<float>(leg.q_wrist);
+    data[7] = leg.facing_out ? 1.0f : 0.0f;
+    data[8] = leg.elbow_up ? 1.0f : 0.0f;
     return data;
 }
 
 inline bool decodeLeg(const std::vector<float> &data, Leg &out, std::string &why) {
-    char buf[192];
-    if (data.size() != 6) {
+    char buf[224];
+    if (data.size() != 9) {
         std::snprintf(buf, sizeof(buf),
-                      "a grasp leg is 6 values (x y z wrist_rad facing_out elbow_up), got %u. "
-                      "Three values is a bare point, which cannot say how to hold the jaws.",
+                      "a grasp leg is 9 values (start xyz, target xyz, wrist_rad, facing_out, "
+                      "elbow_up), got %u. Three values is a bare point, which cannot say how to "
+                      "hold the jaws.",
                       static_cast<uint32_t>(data.size()));
         why = buf;
         return false;
     }
-    if (!std::isfinite(data[3])) {
-        why = "the leg carries no wrist roll, so the jaws would arrive at whatever angle they "
-              "happen to be at";
-        return false;
+    for (int i = 0; i < 7; ++i) {
+        if (!std::isfinite(data[i])) {
+            why = i == 6 ? "the leg carries no wrist roll, so the jaws would arrive at whatever "
+                           "angle they happen to be at"
+                         : "the leg's start or target is not a finite point";
+            return false;
+        }
     }
 
-    out.target     = {data[0], data[1], data[2]};
-    out.q_wrist    = data[3];
-    out.facing_out = data[4] != 0.0f;
-    out.elbow_up   = data[5] != 0.0f;
+    out.start      = {data[0], data[1], data[2]};
+    out.target     = {data[3], data[4], data[5]};
+    out.q_wrist    = data[6];
+    out.facing_out = data[7] != 0.0f;
+    out.elbow_up   = data[8] != 0.0f;
     return true;
+}
+
+inline kine::Joints snapToWindow(const kine::Geom &g, const kine::Joints &q, double slack_deg) {
+    kine::Joints out   = q;
+    const double slack = kine::deg2rad(slack_deg);
+    for (int j = 0; j < kine::DOF; ++j) {
+        if (q[j] < g.windowLo(j) && q[j] >= g.windowLo(j) - slack) {
+            out[j] = g.windowLo(j);
+        } else if (q[j] > g.windowHi(j) && q[j] <= g.windowHi(j) + slack) {
+            out[j] = g.windowHi(j);
+        }
+    }
+    return out;
 }
 
 inline std::vector<float> encodeJoints(const kine::Joints &q) {
@@ -108,7 +131,7 @@ Status planLine(const kine::Geom &g,
                 Path &out,
                 double &deviation_m);
 
-Status planLineOn(const kine::Geom &g,
+Status planLine(const kine::Geom &g,
                   const Params &p,
                   const kine::Joints &from,
                   const Leg &leg,

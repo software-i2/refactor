@@ -2,6 +2,7 @@
 
 #include <n_check/Grasp.h>
 #include <n_kine/Angle.h>
+#include <n_kine/Fk.h>
 #include <n_kine/Ik.h>
 
 #include <algorithm>
@@ -10,7 +11,10 @@
 namespace check {
 namespace {
 
-constexpr double kUnitEps = 1e-9;
+constexpr double kUnitEps  = 1e-9;
+constexpr int    kPostures = 4;
+constexpr int    kAimTries = 8;
+constexpr double kAimTol   = 1e-6;
 
 // Sample the straight run from standoff to handle so the scorer sees the corridor,
 // not just the final pose.
@@ -35,17 +39,43 @@ bool legClear(const kine::Geom &g,
             q[j] = standoff[j] + (grasp[j] - standoff[j]) * u;
         }
 
-        if (lowestZ(g, q) < floor_z) {
+        b.volume(g, q, scratch, vol);
+        if (lowestZ(vol) < floor_z) {
             hit_floor = true;
             return false;
         }
-        if (f.ok()) {
-            b.volume(g, q, scratch, vol);
-            if (firstBlocked(f, vol) >= 0) {
-                return false;
-            }
+        if (f.ok() && firstBlocked(f, vol) >= 0) {
+            return false;
         }
     }
+    return true;
+}
+
+bool aim(const kine::Geom &g,
+         const kine::Vec3 &point,
+         double back,
+         const kine::Vec3 &guess,
+         bool facing_out,
+         bool elbow_up,
+         const kine::Joints &seed,
+         kine::Branch &out,
+         kine::Vec3 &target) {
+
+    target = point - guess * back;
+    for (int i = 0;; ++i) {
+        if (kine::solve(g, target, g.throatAlong(), facing_out, elbow_up, seed, out.q)
+            != kine::Fail::NONE) {
+            return false;
+        }
+        out.approach          = kine::frame(g, out.q).approach;
+        const kine::Vec3 next = point - out.approach * back;
+        if (kine::norm(next - target) < kAimTol || i + 1 >= kAimTries) {
+            break;
+        }
+        target = next;
+    }
+    out.facing_out = facing_out;
+    out.elbow_up   = elbow_up;
     return true;
 }
 
@@ -63,8 +93,12 @@ const char *name(Block b) {
         return "floor";
     case Block::NO_STANDOFF:
         return "no_standoff";
+    case Block::NO_LINE:
+        return "no_line";
     case Block::OBSTACLE:
         return "obstacle";
+    case Block::NO_ROUTE:
+        return "no_route";
     default:
         return "none";
     }
@@ -85,9 +119,15 @@ const char *reason(Block b) {
     case Block::NO_STANDOFF:
         return "the handle itself is holdable, but the arm cannot reach a standoff to "
                "approach it from";
+    case Block::NO_LINE:
+        return "the standoff and the handle both solve, but the straight run between them "
+               "cannot be driven on one posture";
     case Block::OBSTACLE:
         return "the arm can hold the handle, but the grasp, the standoff, or the run "
                "between them sweeps through a mapped obstacle";
+    case Block::NO_ROUTE:
+        return "the hold is clear, but the move from where the arm is now to its standoff "
+               "crosses the floor, an obstacle or a joint limit";
     default:
         return "";
     }
@@ -101,18 +141,19 @@ const char *Ask::missing() const {
     struct Field {
         const char   *name;
         const double *at;
+        bool          must_be_positive;
     };
     const Field fields[] = {
-            {"task.standoff_m", &standoff_m},
-            {"task.max_approach_dev_deg", &max_approach_dev_deg},
-            {"world.floor_z_m", &floor_z_m},
-            {"task.depth_min_m", &depth_min_m},
-            {"task.depth_max_m", &depth_max_m},
-            {"task.depth_step_m", &depth_step_m},
+            {"task.standoff_m", &standoff_m, true},
+            {"task.max_approach_dev_deg", &max_approach_dev_deg, false},
+            {"world.floor_z_m", &floor_z_m, false},
+            {"task.depth_min_m", &depth_min_m, true},
+            {"task.depth_max_m", &depth_max_m, true},
+            {"task.depth_step_m", &depth_step_m, true},
     };
 
     for (const Field &f : fields) {
-        if (!std::isfinite(*f.at)) {
+        if (!std::isfinite(*f.at) || (f.must_be_positive && *f.at <= 0.0)) {
             return f.name;
         }
     }
@@ -124,7 +165,8 @@ Hold holdable(const kine::Geom &g,
               const Field &f,
               const Ask &ask,
               const kine::Joints &seed,
-              std::vector<kine::Vec3> &scratch) {
+              std::vector<kine::Vec3> &scratch,
+              const Drive &drive) {
 
     Hold out;
     if (!g.ok() || ask.missing() != NULL || kine::norm(ask.axis) < kUnitEps) {
@@ -150,27 +192,28 @@ Hold holdable(const kine::Geom &g,
         deepest = shallow = nominal;
     }
 
-    Block worst = Block::NONE;
-    bool  found = false;
+    const int facings = std::hypot(ask.point.x, ask.point.y) < kUnitEps ? 1 : 2;
 
-    std::vector<kine::Branch> branches;  // reused across depths
+    Block worst = Block::NONE;
+    Hold  best[kPostures];
+    bool  settled[kPostures] = {false, false, false, false};
 
     // Try the deepest valid hold first; the throat opens toward the tip, so it is
     // the most forgiving clearance point.
-    for (double depth = deepest; depth >= shallow - 1e-9 && !found; depth -= step) {
-        const double     back = depth - nominal;
-        const kine::Vec3 target =
-                pn < kUnitEps ? ask.point : ask.point - want * back;
+    for (double depth = deepest; depth >= shallow - 1e-9; depth -= step) {
+        const double back = depth - nominal;
 
-        kine::Fail why = kine::Fail::NONE;
-        kine::branches(g, target, g.throatAlong(), seed, branches, why);
-        if (branches.empty()) {
-            worst = worse(worst, Block::UNREACHABLE);
-            continue;
-        }
+        for (int p = 0; p < 2 * facings; ++p) {
+            if (settled[p]) {
+                continue;
+            }
 
-        for (size_t i = 0; i < branches.size(); ++i) {
-            const kine::Branch &br = branches[i];
+            kine::Branch br;
+            kine::Vec3   target;
+            if (!aim(g, ask.point, back, want, p < 2, p % 2 == 1, seed, br, target)) {
+                worst = worse(worst, Block::UNREACHABLE);
+                continue;
+            }
 
             const double dev = gated ? kine::angleTo(br.approach, want) : 0.0;
             if (gated && dev > worst_dev) {
@@ -196,7 +239,10 @@ Hold holdable(const kine::Geom &g,
 
                 kine::Joints hold = br.q;
                 hold[kine::WRIST] = q_wrist;
-                if (lowestZ(g, hold) < ask.floor_z_m) {
+
+                Body::Volume held;
+                b.volume(g, hold, scratch, held);
+                if (lowestZ(held) < ask.floor_z_m) {
                     worst = worse(worst, Block::FLOOR);
                     continue;
                 }
@@ -213,35 +259,42 @@ Hold holdable(const kine::Geom &g,
                 }
                 stand[kine::WRIST] = q_wrist;
 
-                bool hit_floor = false;
-                if (!legClear(g, b, f, hold, stand, ask.floor_z_m, ask.leg_samples, scratch,
-                              hit_floor)) {
-                    worst = worse(worst, hit_floor ? Block::FLOOR : Block::OBSTACLE);
+                Hold h;
+                h.block            = Block::NONE;
+                h.joints           = hold;
+                h.standoff         = stand;
+                h.point            = target;
+                h.standoff_point   = back_off;
+                h.approach         = br.approach;
+                h.depth_m          = depth;
+                h.approach_dev_rad = dev;
+                h.wrist_margin_rad = std::min(q_wrist - g.windowLo(kine::WRIST),
+                                              g.windowHi(kine::WRIST) - q_wrist);
+                h.travel           = kine::travel(g, seed, stand);
+                h.facing_out       = br.facing_out;
+                h.elbow_up         = br.elbow_up;
+
+                if (settled[p] && h.travel >= best[p].travel) {
                     continue;
                 }
 
-                // Least travel wins. The old code scaled this by a weight_travel
-                // that multiplied every candidate alike, so it never decided
-                // anything; it is not carried over.
-                const double travel = kine::travel(g, seed, stand);
-                if (found && travel >= out.travel) {
+                Block leg = Block::NONE;
+                if (drive) {
+                    leg = drive(h);
+                } else {
+                    bool hit_floor = false;
+                    if (!legClear(g, b, f, hold, stand, ask.floor_z_m, ask.leg_samples, scratch,
+                                  hit_floor)) {
+                        leg = hit_floor ? Block::FLOOR : Block::OBSTACLE;
+                    }
+                }
+                if (leg != Block::NONE) {
+                    worst = worse(worst, leg);
                     continue;
                 }
 
-                found                = true;
-                out.block            = Block::NONE;
-                out.joints           = hold;
-                out.standoff         = stand;
-                out.point            = target;
-                out.standoff_point   = back_off;
-                out.approach         = br.approach;
-                out.depth_m          = depth;
-                out.approach_dev_rad = dev;
-                out.wrist_margin_rad = std::min(q_wrist - g.windowLo(kine::WRIST),
-                                                g.windowHi(kine::WRIST) - q_wrist);
-                out.travel           = travel;
-                out.facing_out       = br.facing_out;
-                out.elbow_up         = br.elbow_up;
+                best[p]    = h;
+                settled[p] = true;
             }
 
             if (!any_fit) {
@@ -250,10 +303,20 @@ Hold holdable(const kine::Geom &g,
         }
     }
 
-    if (!found) {
-        out.block = worst == Block::NONE ? Block::UNREACHABLE : worst;
+    // Least travel wins. The old code scaled this by a weight_travel
+    // that multiplied every candidate alike, so it never decided
+    // anything; it is not carried over.
+    int pick = -1;
+    for (int p = 0; p < kPostures; ++p) {
+        if (settled[p] && (pick < 0 || best[p].travel < best[pick].travel)) {
+            pick = p;
+        }
     }
-    return out;
+    if (pick < 0) {
+        out.block = worst == Block::NONE ? Block::UNREACHABLE : worst;
+        return out;
+    }
+    return best[pick];
 }
 
 }  // namespace check

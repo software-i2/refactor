@@ -59,7 +59,7 @@ public:
     Body(const Jaws &j, double blade_pitch_m);
 
     struct Volume {
-        kine::Vec3 shoulder, elbow, wrist, mount, palm_end;
+        kine::Vec3 shoulder, elbow, wrist, mount, palm_end, throat, tip;
         const kine::Vec3 *blades = NULL;
         size_t            left  = 0;
         size_t            count = 0;
@@ -90,7 +90,7 @@ private:
     std::vector<kine::Vec3> lattice_;
 };
 
-double lowestZ(const kine::Geom &g, const kine::Joints &q);
+double lowestZ(const Body::Volume &v);
 int firstBlocked(const Field &f, const Body::Volume &v);
 bool blocksItself(const Field &f, const Body &b, const kine::Geom &g,
                   const kine::Joints &safe, std::string &why);

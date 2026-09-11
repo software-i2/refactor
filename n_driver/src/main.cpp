@@ -34,6 +34,10 @@ int main(int argc, char **argv) {
         LOG_ERROR("[arm] %s is not usable:\n%s", config.c_str(), doc.report().c_str());
         return -1;
     }
+    if (p.missing() != NULL) {
+        LOG_ERROR("[arm] %s: %s is missing or not a usable value", config.c_str(), p.missing());
+        return -1;
+    }
 
     LOG_INFO("[arm] config %s\n%s", config.c_str(), doc.effective().c_str());
 

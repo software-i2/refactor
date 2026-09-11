@@ -48,8 +48,8 @@ int main(int argc, char **argv) {
 
     Params arm;
     arm.load(doc);
-    check(doc.problems().empty(), "the config fills every solver parameter");
-    if (!doc.problems().empty()) {
+    check(doc.ok(), "the config fills every solver parameter");
+    if (!doc.ok()) {
         std::printf("%s", doc.report().c_str());
         return 1;
     }
@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
     bool round = true;
     for (int j = 0; j < DOF; ++j) {
         const double wire = 42.0;
-        round = round && std::fabs(toWire(g.params(), j, toKinematic(g.params(), j, wire)) - wire) < 1e-9;
+        round = round && std::fabs(toPubDeg(g.params(), j, toKinematic(g.params(), j, wire)) - wire) < 1e-9;
     }
     check(round, "wire <-> kinematic round trips");
 

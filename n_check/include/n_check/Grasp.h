@@ -7,6 +7,7 @@
 #include <n_check/Field.h>
 #include <n_kine/Geom.h>
 
+#include <functional>
 #include <vector>
 
 namespace check {
@@ -18,7 +19,9 @@ enum class Block {
     NO_CLOCKING,
     FLOOR,
     NO_STANDOFF,
-    OBSTACLE
+    NO_LINE,
+    OBSTACLE,
+    NO_ROUTE
 };
 
 const char *reason(Block b);
@@ -74,12 +77,15 @@ struct Hold {
     bool ok() const { return block == Block::NONE; }
 };
 
+using Drive = std::function<Block(const Hold &)>;
+
 Hold holdable(const kine::Geom &g,
               const Body &b,
               const Field &f,
               const Ask &ask,
               const kine::Joints &seed,
-              std::vector<kine::Vec3> &scratch);
+              std::vector<kine::Vec3> &scratch,
+              const Drive &drive = Drive());
 
 }  // namespace check
 

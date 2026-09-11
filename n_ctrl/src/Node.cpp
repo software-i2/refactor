@@ -109,7 +109,7 @@ void Node::TopicSink::send(const kine::Joints &q) {
     Msg_Float32MultiArray msg;
     msg.data.resize(reach::N_JOINTS - 1);
     for (int j = 0; j < kine::DOF; ++j) {
-        msg.data[WIRE_SLOT[j] - 1] = static_cast<float>(kine::toWire(params, j, q[j]));
+        msg.data[WIRE_SLOT[j] - 1] = static_cast<float>(kine::toPubDeg(params, j, q[j]));
     }
     PUBLISH_ROS(pub_target_, msg);
 }
@@ -187,19 +187,24 @@ void Node::onStates(const sensor_msgs::JointState::ConstPtr &msg) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(mtx_);
+    // Age the state from the message timestamp, not from the moment it arrived.
+    const double lag = (ROS_TIME_NOW() - msg->header.stamp).toSec();
+
+    std::lock_guard<std::mutex> lock(state_mtx_);
     q_ = q;
-    last_state_s_ = reach::nowSec();
+    last_state_s_ = reach::nowSec() - (lag > 0.0 ? lag : 0.0);
     seen_ = true;
 }
 
 void Node::tick() {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     const double now = reach::nowSec();
 
     kine::Joints q;
     double       age = 0.0;
     {
-        std::lock_guard<std::mutex> lock(mtx_);
+        std::lock_guard<std::mutex> lock(state_mtx_);
         if (!seen_) {
             return;
         }
@@ -209,9 +214,9 @@ void Node::tick() {
 
     if (age > p_.feedback_timeout_s) {
         exec_.blind();
+    } else {
+        exec_.measure(q);
     }
-
-    exec_.measure(q);
     const State s = exec_.tick(now);
 
     Msg_UInt8 state_msg;
@@ -241,7 +246,7 @@ void Node::tick() {
         break;
     case State::PILLOW: {
         const int j = exec_.pillowJoint();
-        trail_.stoppedAfter(exec_.issued(), q);
+        trail_.stoppedAfter(exec_.issued(), snapToWindow(g_, q, p_.goal_tolerance_deg));
         LOG_ERROR("[ctrl] PILLOW — %s stopped following while still being driven, so the arm "
                   "has hit something unmapped. Released at (%.3f, %.3f, %.3f); ctrl/return "
                   "will back out the way it came.",
@@ -254,6 +259,9 @@ void Node::tick() {
 }
 
 void Node::publishPose(const kine::Joints &q) {
+    if (!g_.ok()) {
+        return;
+    }
     const kine::Pose  p = kine::forward(g_, q);
     const kine::Vec3 pts[6] = {p.shoulder, p.elbow, p.wrist, p.mount, p.throat, p.tip};
 
@@ -306,12 +314,18 @@ void Node::publishBody(const kine::Joints &q) {
 }
 
 bool Node::snapshot(kine::Joints &q) {
-    std::lock_guard<std::mutex> lock(mtx_);
-    q = q_;
+    std::lock_guard<std::mutex> lock(state_mtx_);
+    q = snapToWindow(g_, q_, p_.goal_tolerance_deg);
     return seen_;
 }
 
 void Node::run(const Path &path, const kine::Joints &from, Move &out, bool record) {
+    if (exec_.busy()) {
+        out.status = Status::BUSY;
+        out.note   = reason(Status::BUSY);
+        return;
+    }
+
     std::string  why;
     const Status s = admit(g_, p_, path, field_, *body_, scratch_, why);
     if (s != Status::OK) {
@@ -376,7 +390,7 @@ Move Node::moveGrasp(const Leg &leg) {
 
     Path         path;
     double       dev = 0.0;
-    const Status s   = planLineOn(g_, p_, q, leg, path, dev);
+    const Status s   = planLine(g_, p_, q, leg, path, dev);
     if (s != Status::OK) {
         out.status = s;
         out.note   = reason(s);
@@ -452,6 +466,8 @@ bool Node::handle(Srv_SetFloat32Array_Request &req,
                   bool straight,
                   bool relative,
                   const char *what) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     if (req.data.size() != 3) {
         LOG_WARN("[ctrl] %s wants 3 values (%s, metres), got %u", what,
                  relative ? "dx dy dz" : "x y z", static_cast<uint32_t>(req.data.size()));
@@ -482,6 +498,8 @@ bool Node::onMoveLRel(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Resp
 }
 
 bool Node::onMoveQ(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     kine::Joints goal;
     std::string  why;
     if (!decodeJoints(req.data, goal, why)) {
@@ -497,6 +515,8 @@ bool Node::onMoveQ(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Respons
 }
 
 bool Node::onMoveGrasp(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     Leg         leg;
     std::string why;
     if (!decodeLeg(req.data, leg, why)) {
@@ -512,6 +532,8 @@ bool Node::onMoveGrasp(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Res
 }
 
 bool Node::onStop(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     const bool was = exec_.busy();
     exec_.abort();
     trail_.clear();
@@ -523,6 +545,8 @@ bool Node::onStop(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
 }
 
 bool Node::onReturn(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     Move out;
     if (trail_.size() < 2) {
         LOG_WARN("[ctrl] return: no outbound path is recorded");
@@ -551,6 +575,8 @@ bool Node::onReturn(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
 }
 
 bool Node::onRest(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     const Move m = moveJoints(restPose(g_.params(), limits_), false);
     report(m, "rest");
     retracing_ = m.ok();

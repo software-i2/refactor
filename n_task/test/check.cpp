@@ -7,7 +7,9 @@
 //
 // argv[1] is the config; it defaults to ../n_conf/config/arm.yaml.
 
+#include <n_ctrl/Path.h>
 #include <n_kine/Angle.h>
+#include <n_kine/Fk.h>
 #include <n_task/Params.h>
 #include <n_task/Pick.h>
 
@@ -87,19 +89,27 @@ int main(int argc, char **argv) {
     // ── choosing among them ───────────────────────────────────────────────
     conf::Doc doc;
     if (!loadConfig(argc > 1 ? argv[1] : "../n_conf/config/arm.yaml", doc,
-                    {"task"}, {"arm", "jaws", "world", "driver"})) {
+                    {"task"}, {"arm", "jaws", "world", "driver", "ctrl"})) {
         return 1;
     }
 
     Params       p;
+    ctrl::Params motion;
     kine::Params geom;
     check::Jaws  jaws;
     p.load(doc);
+    motion.load(doc);
     geom.load(doc);
     jaws.load(doc);
-    expect(doc.problems().empty(), "the config fills the arm, the jaws and strategy");
-    if (!doc.problems().empty()) {
+    expect(doc.ok(), "the config fills the arm, the jaws and strategy");
+    if (!doc.ok()) {
         std::printf("%s", doc.report().c_str());
+        return 1;
+    }
+    expect(p.missing() == NULL && motion.missing() == NULL,
+           "every strategy and motion tunable is a usable value");
+    if (p.missing() != NULL) {
+        std::printf("  -> %s\n", p.missing());
         return 1;
     }
 
@@ -119,7 +129,7 @@ int main(int argc, char **argv) {
     const kine::Joints rest = kine::toKinematic(g.params(), rest_wire);
 
     readCandidates(arc(5, 0.05f, false), cs, why);
-    Choice c = choose(g, body, none, p.ask, cs, rest, scratch);
+    Choice c = choose(g, body, none, p.ask, motion, cs, rest, scratch);
     std::printf("  %zu candidates: %s, refused: %s\n", cs.size(),
                 c.found ? "held" : check::name(c.block), tally(c.per).c_str());
 
@@ -134,7 +144,11 @@ int main(int argc, char **argv) {
             check::Ask a = p.ask;
             a.point      = cs[i].point;
             a.axis       = cs[i].axis;
-            const check::Hold h = check::holdable(g, body, none, a, rest, scratch);
+            std::vector<kine::Vec3> leg_scratch;
+            const check::Hold h = check::holdable(g, body, none, a, rest, scratch,
+                    [&](const check::Hold &x) {
+                        return drivable(g, body, none, motion, rest, x, leg_scratch);
+                    });
             cheapest = cheapest && (!h.ok() || h.travel >= best - 1e-9);
         }
         expect(cheapest, "the cheapest workable candidate is the one chosen");
@@ -151,7 +165,7 @@ int main(int argc, char **argv) {
         far.push_back(0.0f);
     }
     readCandidates(far, cs, why);
-    c = choose(g, body, none, p.ask, cs, rest, scratch);
+    c = choose(g, body, none, p.ask, motion, cs, rest, scratch);
     expect(!c.found && c.block == check::Block::UNREACHABLE,
            "an arc out of reach reports UNREACHABLE");
     std::printf("  out of reach (%zu candidates), refused: %s\n", cs.size(), tally(c.per).c_str());
@@ -163,7 +177,7 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < cs.size(); ++i) {
         cs[i].approach = {0.0, 0.0, 1.0};  // insist on straight down
     }
-    c = choose(g, body, none, fussy, cs, rest, scratch);
+    c = choose(g, body, none, fussy, motion, cs, rest, scratch);
     std::printf("  1 deg approach window: %s, refused: %s\n",
                 c.found ? "held" : check::name(c.block), tally(c.per).c_str());
 
@@ -179,7 +193,7 @@ int main(int argc, char **argv) {
     {
         std::printf("\n  -- preview --\n");
         readCandidates(arc(8, 0.06f, false), cs, why);
-        c = choose(g, body, none, p.ask, cs, rest, scratch);
+        c = choose(g, body, none, p.ask, motion, cs, rest, scratch);
 
         for (size_t i = 0; i < cs.size(); ++i) {
             std::printf("  %3u  (%7.3f, %7.3f, %7.3f)  %-12s %s\n",
@@ -206,6 +220,54 @@ int main(int argc, char **argv) {
 
         expect(ranges({0, 1, 2, 5, 7, 8, 9}) == "0-2, 5, 7-9", "runs of indices collapse");
         expect(ranges({}) == "none", "an empty run reads as none");
+    }
+
+    // ── what the gate passes, ctrl drives ─────────────────────────────────
+    {
+        std::printf("\n  -- gate against the planner --\n");
+        readCandidates(arc(8, 0.06f, true), cs, why);
+        for (size_t i = 0; i < cs.size(); ++i) {
+            cs[i].approach = {0.866, 0.0, -0.5};
+        }
+        c = choose(g, body, none, p.ask, motion, cs, rest, scratch);
+        expect(c.found, "an arc with an approach finds a hold");
+
+        if (c.found) {
+            const kine::Vec3 v   = cs[c.index].point - c.hold.point;
+            const kine::Vec3 a   = kine::unit(c.hold.approach);
+            const double     off = kine::norm(v - a * kine::dot(v, a));
+            std::printf("  depth %.3f m, %.1f deg off the asked approach, handle %.2e m off "
+                        "the jaw axis\n",
+                        c.hold.depth_m, kine::rad2deg(c.hold.approach_dev_rad), off);
+            expect(off < 1e-5, "the handle sits on the jaw axis the jaws arrive along");
+
+            ctrl::Leg leg;
+            leg.start      = c.hold.standoff_point;
+            leg.target     = c.hold.point;
+            leg.q_wrist    = c.hold.joints[kine::WRIST];
+            leg.facing_out = c.hold.facing_out;
+            leg.elbow_up   = c.hold.elbow_up;
+
+            bool        drives = true;
+            std::string admit_why;
+            for (int corner = 0; corner < (1 << kine::DOF); ++corner) {
+                kine::Joints from = c.hold.standoff;
+                for (int j = 0; j < kine::DOF; ++j) {
+                    const double sign = (corner >> j) & 1 ? 1.0 : -1.0;
+                    from[j] += kine::deg2rad(sign * motion.goal_tolerance_deg);
+                }
+                from = ctrl::snapToWindow(g, from, motion.goal_tolerance_deg);
+
+                ctrl::Path line;
+                double     dev = 0.0;
+                drives = drives
+                         && ctrl::planLine(g, motion, from, leg, line, dev) == ctrl::Status::OK
+                         && ctrl::admit(g, motion, line, none, body, scratch, admit_why)
+                                    == ctrl::Status::OK
+                         && kine::norm(kine::forward(g, line.back()).throat - c.hold.point) < 1e-9;
+            }
+            expect(drives, "the advance drives from every corner of the arrival tolerance");
+        }
     }
 
     std::printf("\n%s\n", failures == 0 ? "ALL OK" : "SOME CHECKS FAILED");

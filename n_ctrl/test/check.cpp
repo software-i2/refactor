@@ -63,9 +63,14 @@ int main(int argc, char **argv) {
     p.load(doc);
     geom.load(doc);
     jaws.load(doc);
-    expect(doc.problems().empty(), "the config fills the arm, the jaws and motion");
-    if (!doc.problems().empty()) {
+    expect(doc.ok(), "the config fills the arm, the jaws and motion");
+    if (!doc.ok()) {
         std::printf("%s", doc.report().c_str());
+        return 1;
+    }
+    expect(p.missing() == NULL, "every motion tunable is a usable value");
+    if (p.missing() != NULL) {
+        std::printf("  -> %s\n", p.missing());
         return 1;
     }
 
@@ -167,6 +172,49 @@ int main(int argc, char **argv) {
     expect(late == State::STALLED, "not arriving before the timeout STALLS");
     expect(frozen.released == 1, "a stall releases the arm to standby");
 
+    int mover = 0;
+    for (int j = 1; j < kine::DOF; ++j) {
+        if (std::fabs(goal[j] - rest[j]) > std::fabs(goal[mover] - rest[mover])) {
+            mover = j;
+        }
+    }
+    FakeArm late_arm;
+    late_arm.at = rest;
+    Exec jam(p, late_arm);
+    jam.load(path);
+    t = 0.0;
+    double all_sent = -1.0;
+    for (int i = 0; i < 400 && jam.busy(); ++i) {
+        if (late_arm.sent + 3 >= static_cast<int>(path.size())) {
+            late_arm.stuck = mover;
+        }
+        if (all_sent < 0.0 && late_arm.sent == static_cast<int>(path.size())) {
+            all_sent = t;
+        }
+        jam.measure(late_arm.at);
+        jam.tick(t);
+        t += 1.0 / p.rate_hz;
+    }
+    std::printf("  joint %d seized 3 waypoints from the end: %s %.1f s after the last was sent\n",
+                mover, name(jam.state()), t - all_sent);
+    expect(jam.state() == State::PILLOW, "a joint that seizes at the end trips while settling");
+    expect(all_sent >= 0.0 && t - all_sent < p.arrival_timeout_s,
+           "and trips long before the arrival timeout");
+
+    Path outside;
+    outside.push_back(goal);
+    outside[0][kine::BASE] = g.windowHi(kine::BASE) + 0.1;
+    expect(admit(g, floored, outside, no_field, body, scratch, why) == Status::LIMIT,
+           "a waypoint outside the window is refused as LIMIT before the floor is asked");
+
+    kine::Joints edge = rest;
+    edge[kine::BASE]  = g.windowLo(kine::BASE) - kine::deg2rad(0.05);
+    expect(snapToWindow(g, edge, p.goal_tolerance_deg)[kine::BASE] == g.windowLo(kine::BASE),
+           "a reading a hair past the window snaps onto its edge");
+    edge[kine::BASE] = g.windowLo(kine::BASE) - kine::deg2rad(5.0);
+    expect(snapToWindow(g, edge, p.goal_tolerance_deg)[kine::BASE] == edge[kine::BASE],
+           "a reading well past the window is left for admit to refuse");
+
     Trail trail;
     trail.start(rest);
     trail.add(path);
@@ -182,16 +230,17 @@ int main(int argc, char **argv) {
     fresh.add(path);
     expect(fresh.empty(), "a trail that was never started records nothing");
 
-    if (argc > 1) {
+    if (argc > 2) {
         check::Field real;
         std::string  err;
-        if (real.load(argv[1], err)) {
-            const Status s = admit(g, p, path, real, body, scratch, why);
-            std::printf("  with %s: %s\n", argv[1], why.empty() ? "admitted" : why.c_str());
+        if (real.load(argv[2], err)) {
+            const check::Body real_body(jaws, check::Jaws::bladePitch(real.res()));
+            const Status s = admit(g, p, path, real, real_body, scratch, why);
+            std::printf("  with %s: %s\n", argv[2], why.empty() ? "admitted" : why.c_str());
             expect(s != Status::OBSTACLE || why.find("waypoint") != std::string::npos,
                    "an obstacle refusal names the part and the waypoint");
         } else {
-            std::printf("  could not load %s: %s\n", argv[1], err.c_str());
+            std::printf("  could not load %s: %s\n", argv[2], err.c_str());
         }
     }
 
@@ -234,6 +283,7 @@ int main(int argc, char **argv) {
             expect(worst < 1e-9, "leg 1 lands on the standoff posture exactly");
 
             Leg leg;
+            leg.start      = h.standoff_point;
             leg.target     = h.point;
             leg.q_wrist    = h.joints[kine::WRIST];
             leg.facing_out = h.facing_out;
@@ -248,7 +298,7 @@ int main(int argc, char **argv) {
 
             Path   leg2;
             double dev = 0.0;
-            const Status s2 = planLineOn(g, p, arm.at, wired, leg2, dev);
+            const Status s2 = planLine(g, p, arm.at, wired, leg2, dev);
             expect(s2 == Status::OK, "the advance leg plans");
             expect(admit(g, p, leg2, none, body, scratch, why) == Status::OK,
                    "the advance leg is admitted");

@@ -22,8 +22,6 @@ enum class Step : uint8_t {
     AT_STANDOFF,
     ADVANCING,
     HOLDING,
-    RETREATING,
-    DONE,
     FAILED
 };
 
@@ -31,8 +29,8 @@ const char *name(Step s);
 
 class Node {
 public:
-    Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
-         const reach::Limits &limits, const std::string &field_path);
+    Node(const Params &p, const ctrl::Params &motion, const kine::Params &arm,
+         const check::Jaws &jaws, const reach::Limits &limits, const std::string &field_path);
 
     void tick();
 
@@ -45,7 +43,6 @@ private:
     bool onStart(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
     bool onPick(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res);
     bool onAdvance(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
-    bool onRetreat(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
     bool onClose(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
     bool onOpen(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
     bool onHome(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
@@ -57,7 +54,6 @@ private:
 
     bool goStandoff(std::string &why);
     bool goGrasp(std::string &why);
-    bool goStandoffBack(std::string &why);
 
     bool moveToPose(const kine::Joints &goal, std::string &why);
     bool moveAlong(const kine::Vec3 &to, std::string &why);
@@ -76,7 +72,6 @@ private:
     DECLARE_ROS_SERVICE_SERVER(srv_start_, Srv_Trigger)
     DECLARE_ROS_SERVICE_SERVER(srv_pick_, Srv_SetFloat32Array)
     DECLARE_ROS_SERVICE_SERVER(srv_advance_, Srv_Trigger)
-    DECLARE_ROS_SERVICE_SERVER(srv_retreat_, Srv_Trigger)
     DECLARE_ROS_SERVICE_SERVER(srv_close_, Srv_Trigger)
     DECLARE_ROS_SERVICE_SERVER(srv_open_, Srv_Trigger)
     DECLARE_ROS_SERVICE_SERVER(srv_home_, Srv_Trigger)
@@ -90,6 +85,7 @@ private:
     DECLARE_ROS_SERVICE_CLIENT(cli_open_jaw_, Srv_Trigger)
 
     Params        p_;
+    ctrl::Params  motion_;
     kine::Geom    g_;
     check::Jaws   jaws_;
     reach::Limits limits_;
@@ -98,7 +94,11 @@ private:
     std::unique_ptr<check::Body> body_;
     std::vector<kine::Vec3>      scratch_;
 
-    std::mutex   mtx_;
+    // Service callbacks run on the spinner threads, tick() on the main loop.
+    // work_mtx_ covers the plan and the step machine; state_mtx_ only the
+    // feedback the subscribers write. Always taken in that order.
+    std::mutex   work_mtx_;
+    std::mutex   state_mtx_;
     kine::Joints q_{};
     bool         seen_ = false;
 

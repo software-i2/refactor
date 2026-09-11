@@ -25,7 +25,7 @@ Sim::Sim(double joint_speed, double jaw_speed, const Limits &limits)
           last_step_s_(nowSec()) {
 
     for (uint32_t j = 0; j < N_JOINTS; ++j) {
-        joints_[j].position = toWire(j, limits_.rest_pos[j]);
+        joints_[j].position = toWireRad(j, limits_.rest_pos[j]);
         joints_[j].target   = joints_[j].position;
     }
     std::cout << "[Sim] arm simulated, starting at rest." << std::endl;
@@ -102,8 +102,8 @@ void Sim::handle(const Packet &pkt) {
     switch (pkt.id) {
     case Pkt::POSITION: {
         // The firmware takes any target and stalls on the stop, so the sim clamps instead.
-        const float lo = toWire(j, limits_.min_pos[j]);
-        const float hi = toWire(j, limits_.max_pos[j]);
+        const float lo = toWireRad(j, limits_.min_pos[j]);
+        const float hi = toWireRad(j, limits_.max_pos[j]);
         const float t  = decodeFloat(pkt.data);
 
         joint.target   = std::min(std::max(t, std::min(lo, hi)), std::max(lo, hi));

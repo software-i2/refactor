@@ -65,21 +65,22 @@ struct Params {
         struct Field {
             const char   *name;
             const double *at;
+            bool          must_be_positive;
         };
         const Field fields[] = {
-                {"driver.rate_hz", &rate_hz},
-                {"driver.climate_period_s", &climate_period_s},
-                {"driver.log_period_s", &log_period_s},
-                {"driver.jog_timeout_s", &jog_timeout_s},
-                {"driver.reply_timeout_s", &reply_timeout_s},
-                {"driver.climate_timeout_s", &climate_timeout_s},
-                {"driver.sim_joint_speed", &sim_joint_speed},
-                {"driver.sim_jaw_speed", &sim_jaw_speed},
-                {"jaws.open_mm", &jaw_open_mm},
+                {"driver.rate_hz", &rate_hz, true},
+                {"driver.climate_period_s", &climate_period_s, true},
+                {"driver.log_period_s", &log_period_s, true},
+                {"driver.jog_timeout_s", &jog_timeout_s, true},
+                {"driver.reply_timeout_s", &reply_timeout_s, true},
+                {"driver.climate_timeout_s", &climate_timeout_s, true},
+                {"driver.sim_joint_speed", &sim_joint_speed, true},
+                {"driver.sim_jaw_speed", &sim_jaw_speed, true},
+                {"jaws.open_mm", &jaw_open_mm, true},
         };
 
         for (const Field &f : fields) {
-            if (!std::isfinite(*f.at)) {
+            if (!std::isfinite(*f.at) || (f.must_be_positive && *f.at <= 0.0)) {
                 return f.name;
             }
         }

@@ -37,12 +37,17 @@ int main(int argc, char **argv) {
         LOG_ERROR("[ctrl] %s is not usable:\n%s", config.c_str(), doc.report().c_str());
         return -1;
     }
+    if (p.missing() != NULL) {
+        LOG_ERROR("[ctrl] %s: %s is missing or not a usable value", config.c_str(), p.missing());
+        return -1;
+    }
 
     LOG_INFO("[ctrl] config %s\n%s", config.c_str(), doc.effective().c_str());
 
     ctrl::Node node(p, arm, jaws, limits, field_path);
     LOG_INFO("[ctrl] ready");
 
+    // Run ROS callbacks and the control loop concurrently.
     ROS_ASYNC_SPIN(2)
 
     ros::Rate loop(p.rate_hz);

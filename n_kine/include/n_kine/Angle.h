@@ -30,7 +30,7 @@ inline double toKinematic(const Params &p, int j, double wire_deg) {
     return p.direction_sign[j] * (deg2rad(wire_deg) - deg2rad(p.zero_offset_deg[j]));
 }
 
-inline double toWire(const Params &p, int j, double q_kin) {
+inline double toPubDeg(const Params &p, int j, double q_kin) {
     return rad2deg(deg2rad(p.zero_offset_deg[j]) + p.direction_sign[j] * q_kin);
 }
 

@@ -91,7 +91,11 @@ private:
     Exec       exec_;
     Trail      trail_;
 
-    std::mutex   mtx_;
+    // Service callbacks run on the spinner threads, tick() on the main loop.
+    // work_mtx_ covers everything a move touches; state_mtx_ only the feedback
+    // the subscriber writes. Always taken in that order.
+    std::mutex   work_mtx_;
+    std::mutex   state_mtx_;
     kine::Joints q_{};
     bool         seen_        = false;
     double       last_state_s_ = 0.0;

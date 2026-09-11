@@ -77,8 +77,8 @@ ctrl:
 
   pillow_stop: true
   pillow_min_step_deg: 0.2
-  pillow_follow_frac: 0.25
-  pillow_strikes: 3
+  pillow_follow_frac: 0.2
+  pillow_strikes: 10
 
 task:
   rate_hz: 5.0

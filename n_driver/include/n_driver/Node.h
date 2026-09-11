@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 
 namespace reach {
@@ -60,11 +61,17 @@ private:
     std::shared_ptr<Arm> arm_;
     Params               p_;
 
-    SafeArray<float, N_JOINTS>   pos_;
-    SafeArray<uint8_t, N_JOINTS> mode_;
-    SafeArray<uint8_t, N_JOINTS> logged_mode_;
-    SafeArray<Climate, N_JOINTS> climate_;
-    bool                         climate_seen_ = false;
+    // Callbacks run on the spinner threads, tick() on the main loop. Everything
+    // below is shared between them.
+    std::mutex mtx_;
+
+    SafeArray<ros::Time, N_JOINTS> read_at_;
+    SafeArray<float, N_JOINTS>     pos_;
+    SafeArray<uint8_t, N_JOINTS>   mode_;
+    SafeArray<uint8_t, N_JOINTS>   logged_mode_;
+    SafeArray<Climate, N_JOINTS>   climate_;
+    bool                         climate_seen_   = false;
+    bool                         warned_no_pose_ = false;
 
     uint32_t ticks_      = 0;
     double   climate_at_ = 0.0;

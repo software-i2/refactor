@@ -1,5 +1,6 @@
 // Copyright by BeeX [2026]
 
+#include <n_ctrl/Path.h>
 #include <n_kine/Angle.h>
 #include <n_task/Pick.h>
 
@@ -76,10 +77,51 @@ bool readCandidates(const std::vector<float> &data,
     return true;
 }
 
+check::Block drivable(const kine::Geom &g,
+                      const check::Body &b,
+                      const check::Field &f,
+                      const ctrl::Params &motion,
+                      const kine::Joints &from,
+                      const check::Hold &h,
+                      std::vector<kine::Vec3> &scratch) {
+    std::string why;
+
+    ctrl::Leg leg;
+    leg.start      = h.standoff_point;
+    leg.target     = h.point;
+    leg.q_wrist    = h.joints[kine::WRIST];
+    leg.facing_out = h.facing_out;
+    leg.elbow_up   = h.elbow_up;
+
+    ctrl::Path line;
+    double     dev = 0.0;
+    if (ctrl::planLine(g, motion, h.standoff, leg, line, dev) != ctrl::Status::OK) {
+        return check::Block::NO_LINE;
+    }
+    switch (ctrl::admit(g, motion, line, f, b, scratch, why)) {
+    case ctrl::Status::OK:
+        break;
+    case ctrl::Status::FLOOR:
+        return check::Block::FLOOR;
+    case ctrl::Status::OBSTACLE:
+        return check::Block::OBSTACLE;
+    default:
+        return check::Block::NO_LINE;
+    }
+
+    ctrl::Path route;
+    ctrl::planJoint(motion, from, h.standoff, route);
+    if (ctrl::admit(g, motion, route, f, b, scratch, why) != ctrl::Status::OK) {
+        return check::Block::NO_ROUTE;
+    }
+    return check::Block::NONE;
+}
+
 Choice choose(const kine::Geom &g,
               const check::Body &b,
               const check::Field &f,
               const check::Ask &policy,
+              const ctrl::Params &motion,
               const std::vector<Candidate> &candidates,
               const kine::Joints &seed,
               std::vector<kine::Vec3> &scratch) {
@@ -88,13 +130,19 @@ Choice choose(const kine::Geom &g,
     out.per.assign(candidates.size(), check::Block::UNREACHABLE);
     out.travel.assign(candidates.size(), std::numeric_limits<double>::quiet_NaN());
 
+    const kine::Joints      from = ctrl::snapToWindow(g, seed, motion.goal_tolerance_deg);
+    std::vector<kine::Vec3> leg_scratch;
+    const check::Drive      drive = [&](const check::Hold &h) {
+        return drivable(g, b, f, motion, from, h, leg_scratch);
+    };
+
     for (size_t i = 0; i < candidates.size(); ++i) {
         check::Ask ask = policy;
         ask.point      = candidates[i].point;
         ask.axis       = candidates[i].axis;
         ask.approach   = candidates[i].approach;
 
-        const check::Hold h = check::holdable(g, b, f, ask, seed, scratch);
+        const check::Hold h = check::holdable(g, b, f, ask, seed, scratch, drive);
         out.per[i]          = h.block;
 
         if (h.ok()) {
@@ -201,7 +249,7 @@ std::string summarise(const Choice &c, const std::vector<Candidate> &candidates)
 }
 
 std::string tally(const std::vector<check::Block> &per) {
-    const int kBlocks = static_cast<int>(check::Block::OBSTACLE) + 1;
+    const int kBlocks = static_cast<int>(check::Block::NO_ROUTE) + 1;
     std::vector<int> count(kBlocks, 0);
     for (size_t i = 0; i < per.size(); ++i) {
         const int b = static_cast<int>(per[i]);

@@ -133,6 +133,8 @@ void Body::volume(const kine::Geom &g, const kine::Joints &q,
     out.wrist    = p.wrist;
     out.mount    = p.mount;
     out.palm_end = p.mount + f.approach * j_.palm_length_m;
+    out.throat   = p.throat;
+    out.tip      = p.tip;
 
     buf.clear();
     out.blades = NULL;
@@ -174,9 +176,15 @@ double Body::throatHalfGap(double depth) const {
     return root_lat + (tip_lat - root_lat) * (depth - root_ax) / (tip_ax - root_ax);
 }
 
-double lowestZ(const kine::Geom &g, const kine::Joints &q) {
-    const kine::Pose p = kine::forward(g, q);
-    return std::min({p.shoulder.z, p.elbow.z, p.wrist.z, p.mount.z, p.throat.z, p.tip.z});
+// The blades reach furthest off the wrist axis, so the axis points alone understate
+// how low the arm gets.
+double lowestZ(const Body::Volume &v) {
+    double low = std::min({v.shoulder.z, v.elbow.z, v.wrist.z, v.mount.z, v.palm_end.z,
+                           v.throat.z, v.tip.z});
+    for (size_t i = 0; i < v.count; ++i) {
+        low = std::min(low, v.blades[i].z);
+    }
+    return low;
 }
 
 double Body::maxDepth() const {

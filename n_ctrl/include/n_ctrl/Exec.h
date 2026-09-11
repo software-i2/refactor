@@ -66,6 +66,8 @@ public:
 private:
     bool arrived() const;
     int  notFollowing() const;
+    int  notClosing() const;
+    bool strike(int held);
 
     Params p_;
     Sink  &sink_;

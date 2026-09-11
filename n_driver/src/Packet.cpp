@@ -9,6 +9,9 @@
 namespace reach {
 namespace {
 
+// Longest frame this driver ever sends or expects is a few dozen bytes.
+constexpr size_t kMaxBuffer = 4096;
+
 const std::array<uint8_t, 256> kCrcTable = []() {
     std::array<uint8_t, 256> t{};
     for (int i = 0; i < 256; ++i) {
@@ -122,6 +125,12 @@ float decodeFloat(const std::vector<uint8_t> &data) {
 std::vector<Packet> Reader::feed(const uint8_t *data, size_t len) {
     std::vector<Packet> packets;
     buf_.insert(buf_.end(), data, data + len);
+
+    // A line stuck high never delivers a delimiter, and the buffer would grow
+    // until the node is killed. The oldest bytes cannot start a frame any more.
+    if (buf_.size() > kMaxBuffer) {
+        buf_.erase(buf_.begin(), buf_.end() - kMaxBuffer);
+    }
 
     for (;;) {
         const auto end = std::find(buf_.begin(), buf_.end(), uint8_t{0x00});

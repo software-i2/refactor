@@ -16,13 +16,16 @@ enum Joint : uint32_t { JAW = 0, WRIST, ELBOW, SHOULDER, BASE, N_JOINTS };
 constexpr uint8_t DEVICE[N_JOINTS] = {0x01, 0x02, 0x03, 0x04, 0x05};
 constexpr const char *NAME[N_JOINTS] = {"jaw", "wrist", "elbow", "shoulder", "base_rot"};
 constexpr const char *CONF_NAME[N_JOINTS] = {"jaw", "wrist", "elbow", "shoulder", "base"};
+constexpr const char *LIMIT_KEY[N_JOINTS] = {
+        "driver.limits.jaw", "driver.limits.wrist", "driver.limits.elbow",
+        "driver.limits.shoulder", "driver.limits.base"};
 constexpr const char *URDF_NAME[N_JOINTS] = {"axis_a", "axis_b", "axis_c", "axis_d", "axis_e"};
 
 constexpr float RAD_TO_DEG = static_cast<float>(180.0 / M_PI);
 constexpr float SCALE[N_JOINTS] = {1.0f, RAD_TO_DEG, RAD_TO_DEG, RAD_TO_DEG, RAD_TO_DEG};
 
 inline float toPub(uint32_t j, float wire) { return wire * SCALE[j]; }
-inline float toWire(uint32_t j, float pub) { return pub / SCALE[j]; }
+inline float toWireRad(uint32_t j, float pub) { return pub / SCALE[j]; }
 
 struct Limits {
     static constexpr float NONE = std::numeric_limits<float>::quiet_NaN();
@@ -54,8 +57,10 @@ struct Limits {
     const char *missing() const {
         for (uint32_t j = 0; j < N_JOINTS; ++j) {
             if (!std::isfinite(min_pos[j]) || !std::isfinite(max_pos[j])
-                || !std::isfinite(rest_pos[j]) || !std::isfinite(max_vel[j])) {
-                return CONF_NAME[j];
+                || !std::isfinite(rest_pos[j]) || !std::isfinite(max_vel[j])
+                || min_pos[j] > max_pos[j] || max_vel[j] <= 0.0f
+                || rest_pos[j] < min_pos[j] || rest_pos[j] > max_pos[j]) {
+                return LIMIT_KEY[j];
             }
         }
         return NULL;

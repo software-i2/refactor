@@ -63,12 +63,12 @@ bool Arm::ask(uint8_t device, uint8_t field, double timeout, Packet &out) {
 
 void Arm::move(uint32_t j, float pos) {
     std::lock_guard<std::mutex> lock(mutex_);
-    send(DEVICE[j], Pkt::POSITION, encodeFloat(toWire(j, pos)));
+    send(DEVICE[j], Pkt::POSITION, encodeFloat(toWireRad(j, pos)));
 }
 
 void Arm::jog(uint32_t j, float vel) {
     std::lock_guard<std::mutex> lock(mutex_);
-    send(DEVICE[j], Pkt::VELOCITY, encodeFloat(toWire(j, vel)));
+    send(DEVICE[j], Pkt::VELOCITY, encodeFloat(toWireRad(j, vel)));
 }
 
 void Arm::standby(uint32_t j) {

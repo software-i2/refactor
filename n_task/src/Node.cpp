@@ -24,18 +24,14 @@ const char *name(Step s) {
         return "closing in on the handle";
     case Step::HOLDING:
         return "holding";
-    case Step::RETREATING:
-        return "backing out";
-    case Step::DONE:
-        return "done";
     default:
         return "failed";
     }
 }
 
-Node::Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
-           const reach::Limits &limits, const std::string &field_path)
-        : p_(p), g_(arm), jaws_(jaws), limits_(limits) {
+Node::Node(const Params &p, const ctrl::Params &motion, const kine::Params &arm,
+           const check::Jaws &jaws, const reach::Limits &limits, const std::string &field_path)
+        : p_(p), motion_(motion), g_(arm), jaws_(jaws), limits_(limits) {
 
     INIT_ROS_PUBLISHER(pub_step_, Msg_UInt8, "task/step", 1);
     INIT_ROS_PUBLISHER(pub_chosen_, Msg_PoseArray, "task/chosen", 1);
@@ -47,7 +43,6 @@ Node::Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
     INIT_ROS_SERVICE_SERVER(srv_start_, "task/start", &Node::onStart);
     INIT_ROS_SERVICE_SERVER(srv_pick_, "task/pick", &Node::onPick);
     INIT_ROS_SERVICE_SERVER(srv_advance_, "task/advance", &Node::onAdvance);
-    INIT_ROS_SERVICE_SERVER(srv_retreat_, "task/retreat", &Node::onRetreat);
     INIT_ROS_SERVICE_SERVER(srv_close_, "task/close_jaw", &Node::onClose);
     INIT_ROS_SERVICE_SERVER(srv_open_, "task/open_jaw", &Node::onOpen);
     INIT_ROS_SERVICE_SERVER(srv_home_, "task/home", &Node::onHome);
@@ -99,12 +94,13 @@ void Node::onStates(const sensor_msgs::JointState::ConstPtr &msg) {
         return;  // not the driver's joint_states
     }
 
-    std::lock_guard<std::mutex> lock(mtx_);
+    std::lock_guard<std::mutex> lock(state_mtx_);
     q_ = q;
     seen_ = true;
 }
 
 void Node::onCtrlState(const Msg_UInt8::ConstPtr &msg) {
+    std::lock_guard<std::mutex> lock(state_mtx_);
     ctrl_state_ = static_cast<ctrl::State>(msg->data);
     ctrl_seen_  = true;
     ctrl_at_    = reach::nowSec();
@@ -114,19 +110,22 @@ void Node::onCtrlState(const Msg_UInt8::ConstPtr &msg) {
 }
 
 bool Node::snapshot(kine::Joints &q) {
-    std::lock_guard<std::mutex> lock(mtx_);
+    std::lock_guard<std::mutex> lock(state_mtx_);
     q = q_;
     return seen_;
 }
 
 void Node::enter(Step s) {
-    if (step_ == s) {
-        return;
+    const bool changed = step_ != s;
+    step_   = s;
+    leg_at_ = reach::nowSec();
+    {
+        std::lock_guard<std::mutex> lock(state_mtx_);
+        ctrl_busy_ = false;
     }
-    step_      = s;
-    leg_at_    = reach::nowSec();
-    ctrl_busy_ = false;
-    LOG_INFO("[task] %s", name(s));
+    if (changed) {
+        LOG_INFO("[task] %s", name(s));
+    }
 }
 
 bool Node::plan(const std::vector<float> &data, std::string &why) {
@@ -146,7 +145,7 @@ bool Node::plan(const std::vector<float> &data, std::string &why) {
     }
 
     // Solve every candidate first; ranking is based on the resulting postures.
-    last_       = choose(g_, *body_, field_, p_.ask, candidates, seed, scratch_);
+    last_       = choose(g_, *body_, field_, p_.ask, motion_, candidates, seed, scratch_);
     candidates_ = candidates;
 
     report();
@@ -241,6 +240,7 @@ bool Node::moveToPose(const kine::Joints &goal, std::string &why) {
 // and the roll are what the gate solved, and holding them is the point.
 bool Node::moveAlong(const kine::Vec3 &to, std::string &why) {
     ctrl::Leg leg;
+    leg.start      = hold_.standoff_point;
     leg.target     = to;
     leg.q_wrist    = hold_.joints[kine::WRIST];
     leg.facing_out = hold_.facing_out;
@@ -267,6 +267,11 @@ bool Node::jaw(bool shut, std::string &why) {
         why = shut ? "cmd/close_jaw did not answer" : "cmd/open_jaw did not answer";
         return false;
     }
+    if (!srv.response.success) {
+        why = srv.response.message.empty() ? "the jaw command was refused"
+                                           : srv.response.message;
+        return false;
+    }
     return true;
 }
 
@@ -275,11 +280,14 @@ bool Node::goStandoff(std::string &why) {
         why = "nothing planned; call task/plan first";
         return false;
     }
+    // Armed before the call, or a leg n_ctrl finishes quickly reports REACHED
+    // before this step starts watching and the arrival is never seen.
+    enter(Step::TO_STANDOFF);
     // The posture, not the point: this is the pose the gate cleared.
     if (!moveToPose(hold_.standoff, why)) {
+        enter(Step::FAILED);
         return false;
     }
-    enter(Step::TO_STANDOFF);
     return true;
 }
 
@@ -290,39 +298,42 @@ bool Node::goGrasp(std::string &why) {
     }
     // Straight in, so the jaws travel down the approach instead of swinging
     // through the handle on an arc, and on the branch and roll the gate solved.
-    if (!moveAlong(hold_.point, why)) {
-        return false;
-    }
     enter(Step::ADVANCING);
-    return true;
-}
-
-bool Node::goStandoffBack(std::string &why) {
-    if (!planned_) {
-        why = "nothing planned";
+    if (!moveAlong(hold_.point, why)) {
+        enter(Step::FAILED);
         return false;
     }
-    if (!moveAlong(hold_.standoff_point, why)) {
-        return false;
-    }
-    enter(Step::RETREATING);
     return true;
 }
 
 void Node::tick() {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     Msg_UInt8 msg;
     msg.data = static_cast<uint8_t>(step_);
     PUBLISH_ROS(pub_step_, msg);
 
-    const bool running = step_ == Step::TO_STANDOFF || step_ == Step::ADVANCING
-                         || step_ == Step::RETREATING;
-    if (!running || !ctrl_seen_) {
+    const bool running = step_ == Step::TO_STANDOFF || step_ == Step::ADVANCING;
+
+    ctrl::State ctrl_state = ctrl::State::IDLE;
+    bool        ctrl_seen  = false;
+    bool        ctrl_busy  = false;
+    double      ctrl_at    = 0.0;
+    {
+        std::lock_guard<std::mutex> lock(state_mtx_);
+        ctrl_state = ctrl_state_;
+        ctrl_seen  = ctrl_seen_;
+        ctrl_busy  = ctrl_busy_;
+        ctrl_at    = ctrl_at_;
+    }
+
+    if (!running || !ctrl_seen) {
         return;
     }
 
     const double now = reach::nowSec();
 
-    if (now - ctrl_at_ > p_.ctrl_silence_s) {
+    if (now - ctrl_at > p_.ctrl_silence_s) {
         LOG_ERROR("[task] n_ctrl has not reported for %.1f s; giving up on the leg",
                   p_.ctrl_silence_s);
         enter(Step::FAILED);
@@ -331,24 +342,24 @@ void Node::tick() {
 
     // ctrl/state is only published from n_ctrl's tick, so until it says it is
     // moving, what it reports still describes the leg before this one.
-    if (!ctrl_busy_) {
+    if (!ctrl_busy) {
         if (now - leg_at_ > p_.ctrl_silence_s) {
             LOG_ERROR("[task] n_ctrl never took the leg; it still reports %s",
-                      ctrl::name(ctrl_state_));
+                      ctrl::name(ctrl_state));
             enter(Step::FAILED);
         }
         return;
     }
 
     // n_ctrl owns whether a leg finished; this only reacts to what it reports.
-    if (ctrl_state_ == ctrl::State::STALLED || ctrl_state_ == ctrl::State::PILLOW
-        || ctrl_state_ == ctrl::State::ABORTED || ctrl_state_ == ctrl::State::IDLE) {
+    if (ctrl_state == ctrl::State::STALLED || ctrl_state == ctrl::State::PILLOW
+        || ctrl_state == ctrl::State::ABORTED || ctrl_state == ctrl::State::IDLE) {
         LOG_ERROR("[task] the arm stopped mid-leg (%s), so the pick is off. The outbound path is "
-                  "kept: task/home will back out.", ctrl::name(ctrl_state_));
+                  "kept: task/home will back out.", ctrl::name(ctrl_state));
         enter(Step::FAILED);
         return;
     }
-    if (ctrl_state_ != ctrl::State::REACHED) {
+    if (ctrl_state != ctrl::State::REACHED) {
         return;
     }
 
@@ -370,16 +381,14 @@ void Node::tick() {
         }
         break;
 
-    case Step::RETREATING:
-        enter(Step::DONE);
-        break;
-
     default:
         break;
     }
 }
 
 bool Node::onPlan(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     std::string why;
     res.success = plan(req.data, why);
     if (!res.success) {
@@ -391,6 +400,8 @@ bool Node::onPlan(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response
 // The evaluation without the commitment. SetFloat32Array carries no message
 // back, so the summary comes through here instead of out of task/plan.
 bool Node::onPreview(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     if (candidates_.empty()) {
         res.success = false;
         res.message = "nothing to preview; send candidates to task/plan first";
@@ -404,6 +415,8 @@ bool Node::onPreview(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
 }
 
 bool Node::onPick(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     std::string why;
     if (!plan(req.data, why)) {
         LOG_WARN("[task] pick: %s", why.c_str());
@@ -421,6 +434,8 @@ bool Node::onPick(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response
 // you have looked at a plan you should not have to hand it the candidates again
 // just to say yes.
 bool Node::onStart(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     std::string why;
     res.success = goStandoff(why);
     res.message = res.success ? "moving to the standoff" : why;
@@ -431,6 +446,8 @@ bool Node::onStart(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
 }
 
 bool Node::onAdvance(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     std::string why;
     res.success = goGrasp(why);
     res.message = res.success ? "closing in on the handle" : why;
@@ -440,17 +457,9 @@ bool Node::onAdvance(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
     return true;
 }
 
-bool Node::onRetreat(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
-    std::string why;
-    res.success = goStandoffBack(why);
-    res.message = res.success ? "backing out to the standoff" : why;
-    if (!res.success) {
-        LOG_WARN("[task] retreat: %s", why.c_str());
-    }
-    return true;
-}
-
 bool Node::onClose(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     std::string why;
     res.success = jaw(true, why);
     res.message = res.success ? "jaw closing" : why;
@@ -461,6 +470,8 @@ bool Node::onClose(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
 }
 
 bool Node::onOpen(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     std::string why;
     res.success = jaw(false, why);
     res.message = res.success ? "jaw opening" : why;
@@ -468,6 +479,8 @@ bool Node::onOpen(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
 }
 
 bool Node::onHome(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     Srv_Trigger srv;
     res.success = CALL_SRV_ROS(cli_return_, srv) && srv.response.success;
     res.message = res.success ? "retracing the way out" : "ctrl/return refused";
@@ -479,6 +492,8 @@ bool Node::onHome(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
 }
 
 bool Node::onStop(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
     Srv_Trigger srv;
     CALL_SRV_ROS(cli_ctrl_stop_, srv);
     enter(Step::IDLE);

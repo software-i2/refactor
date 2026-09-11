@@ -17,6 +17,7 @@ enum class Status {
     OBSTACLE,
     NOT_STRAIGHT,
     EMPTY,
+    BUSY,
     BAD_STATE
 };
 

@@ -11,6 +11,9 @@
 namespace ctrl {
 namespace {
 
+constexpr int    kMaxSteps  = 100000;
+constexpr double kSamePoint = 1e-9;
+
 Status statusFor(kine::Fail f) {
     switch (f) {
     case kine::Fail::LIMIT:
@@ -24,13 +27,32 @@ Status statusFor(kine::Fail f) {
     }
 }
 
+// A non-finite ratio would cast to INT_MIN and collapse the whole ramp to one
+// waypoint, so the count is clamped rather than trusted.
+int stepCount(double span, double per_step) {
+    if (!(per_step > 0.0) || !std::isfinite(span)) {
+        return kMaxSteps;
+    }
+    const double steps = std::ceil(span / per_step);
+    if (!(steps > 1.0)) {
+        return 1;
+    }
+    return steps >= static_cast<double>(kMaxSteps) ? kMaxSteps : static_cast<int>(steps);
+}
+
 int stepsBetween(const Params &p, const kine::Joints &from, const kine::Joints &to) {
     double worst_deg = 0.0;
     for (int j = 0; j < kine::DOF; ++j) {
         worst_deg = std::max(worst_deg, kine::rad2deg(std::fabs(to[j] - from[j])));
     }
-    const int steps = static_cast<int>(std::ceil(worst_deg / p.max_joint_step_deg));
-    return steps < 1 ? 1 : steps;
+    return stepCount(worst_deg, p.max_joint_step_deg);
+}
+
+double offLine(const kine::Vec3 &at, const kine::Vec3 &a, const kine::Vec3 &b) {
+    const kine::Vec3 span = b - a;
+    const double     dist = kine::norm(span);
+    const double     t    = dist > 1e-12 ? kine::dot(at - a, span) / (dist * dist) : 0.0;
+    return kine::norm(at - (a + span * t));
 }
 
 void interpolate(const kine::Joints &from, const kine::Joints &to, int steps, Path &out) {
@@ -50,21 +72,22 @@ const char *Params::missing() const {
     struct Field {
         const char   *name;
         const double *at;
+        bool          must_be_positive;
     };
     const Field fields[] = {
-            {"ctrl.rate_hz", &rate_hz},
-            {"ctrl.max_joint_step_deg", &max_joint_step_deg},
-            {"ctrl.line_step_m", &line_step_m},
-            {"ctrl.goal_tolerance_deg", &goal_tolerance_deg},
-            {"ctrl.feedback_timeout_s", &feedback_timeout_s},
-            {"ctrl.arrival_timeout_s", &arrival_timeout_s},
-            {"world.floor_z_m", &floor_z_m},
-            {"ctrl.pillow_min_step_deg", &pillow_min_step_deg},
-            {"ctrl.pillow_follow_frac", &pillow_follow_frac},
+            {"ctrl.rate_hz", &rate_hz, true},
+            {"ctrl.max_joint_step_deg", &max_joint_step_deg, true},
+            {"ctrl.line_step_m", &line_step_m, true},
+            {"ctrl.goal_tolerance_deg", &goal_tolerance_deg, true},
+            {"ctrl.feedback_timeout_s", &feedback_timeout_s, true},
+            {"ctrl.arrival_timeout_s", &arrival_timeout_s, true},
+            {"world.floor_z_m", &floor_z_m, false},
+            {"ctrl.pillow_min_step_deg", &pillow_min_step_deg, true},
+            {"ctrl.pillow_follow_frac", &pillow_follow_frac, true},
     };
 
     for (const Field &f : fields) {
-        if (!std::isfinite(*f.at)) {
+        if (!std::isfinite(*f.at) || (f.must_be_positive && *f.at <= 0.0)) {
             return f.name;
         }
     }
@@ -86,6 +109,8 @@ const char *reason(Status s) {
                "followed; ask for a joint move instead";
     case Status::EMPTY:
         return "the arm is already there";
+    case Status::BUSY:
+        return "a trajectory is still running; call ctrl/stop first";
     case Status::BAD_STATE:
         return "the arm is not where this move assumed it would be";
     default:
@@ -141,14 +166,15 @@ Status planLine(const kine::Geom &g,
     }
 
     Leg leg;
+    leg.start      = kine::forward(g, from).throat;
     leg.target     = target;
     leg.q_wrist    = from[kine::WRIST];
     leg.facing_out = chosen.facing_out;
     leg.elbow_up   = chosen.elbow_up;
-    return planLineOn(g, p, from, leg, out, deviation_m);
+    return planLine(g, p, from, leg, out, deviation_m);
 }
 
-Status planLineOn(const kine::Geom &g,
+Status planLine(const kine::Geom &g,
                   const Params &p,
                   const kine::Joints &from,
                   const Leg &leg,
@@ -159,23 +185,18 @@ Status planLineOn(const kine::Geom &g,
         return Status::BAD_STATE;
     }
 
-    const kine::Vec3 start = kine::forward(g, from).throat;
-    const kine::Vec3 target = leg.target;
-    const kine::Vec3 span  = target - start;
-    const double     dist  = kine::norm(span);
-
-    int knots = static_cast<int>(std::ceil(dist / p.line_step_m));
-    if (knots < 1) {
-        knots = 1;
-    }
+    const kine::Vec3 here  = kine::forward(g, from).throat;
+    const kine::Vec3 span  = leg.target - leg.start;
+    const int        knots = stepCount(kine::norm(span), p.line_step_m);
+    const int        first = kine::norm(leg.start - here) > kSamePoint ? 0 : 1;
 
     Path solved;
-    kine::Joints first = from;
-    first[kine::WRIST] = leg.q_wrist;
-    solved.push_back(first);
-    for (int k = 1; k <= knots; ++k) {
-        const double     u = static_cast<double>(k) / static_cast<double>(knots);
-        const kine::Vec3 at{start.x + span.x * u, start.y + span.y * u, start.z + span.z * u};
+    kine::Joints origin = from;
+    origin[kine::WRIST] = leg.q_wrist;
+    solved.push_back(origin);
+    for (int k = first; k <= knots; ++k) {
+        const double     u  = static_cast<double>(k) / static_cast<double>(knots);
+        const kine::Vec3 at = leg.start + span * u;
 
         kine::Joints     q;
         const kine::Fail bad = kine::solve(g, at, g.throatAlong(), leg.facing_out, leg.elbow_up,
@@ -192,17 +213,16 @@ Status planLineOn(const kine::Geom &g,
         sub = std::max(sub, stepsBetween(p, solved[k], solved[k + 1]));
     }
 
-    deviation_m           = 0.0;
-    const size_t measured = out.size();
+    deviation_m = 0.0;
     for (size_t k = 0; k + 1 < solved.size(); ++k) {
+        const size_t      begin = out.size();
+        const bool        onto  = first == 0 && k == 0;
+        const kine::Vec3 &a     = onto ? here : leg.start;
+        const kine::Vec3 &b     = onto ? leg.start : leg.target;
         interpolate(solved[k], solved[k + 1], sub, out);
-    }
-    for (size_t i = measured; i < out.size(); ++i) {
-        const kine::Vec3 at = kine::forward(g, out[i]).throat;
-        const kine::Vec3 d  = at - start;
-        const double     t  = dist > 1e-12 ? kine::dot(d, span) / (dist * dist) : 0.0;
-        const kine::Vec3 on{start.x + span.x * t, start.y + span.y * t, start.z + span.z * t};
-        deviation_m = std::max(deviation_m, kine::norm(at - on));
+        for (size_t i = begin; i < out.size(); ++i) {
+            deviation_m = std::max(deviation_m, offLine(kine::forward(g, out[i]).throat, a, b));
+        }
     }
     return deviation_m > p.line_step_m ? Status::NOT_STRAIGHT : Status::OK;
 }
@@ -225,7 +245,26 @@ Status admit(const kine::Geom &g,
     check::Body::Volume vol;
 
     for (size_t i = 0; i < path.size(); ++i) {
-        const double low = check::lowestZ(g, path[i]);
+        // The window is the intersection of arm.limit_*_deg and the hardware's own
+        // range, so this catches a move_q goal that never went through IK.
+        for (int j = 0; j < kine::DOF; ++j) {
+            if (path[i][j] >= g.windowLo(j) && path[i][j] <= g.windowHi(j)) {
+                continue;
+            }
+            const double edge_a = kine::toPubDeg(kp, j, g.windowLo(j));
+            const double edge_b = kine::toPubDeg(kp, j, g.windowHi(j));
+            std::snprintf(buf, sizeof(buf),
+                          "waypoint %u would need joint %d at %.2f deg, outside the [%.2f, %.2f] "
+                          "the arm accepts. This usually means zero_offset_deg is uncalibrated.",
+                          static_cast<uint32_t>(i), j, kine::toPubDeg(kp, j, path[i][j]),
+                          std::min(edge_a, edge_b), std::max(edge_a, edge_b));
+            why = buf;
+            return Status::LIMIT;
+        }
+
+        body.volume(g, path[i], scratch, vol);
+
+        const double low = check::lowestZ(vol);
         if (low < p.floor_z_m) {
             std::snprintf(buf, sizeof(buf), "%s: waypoint %u drops to %.3f m", reason(Status::FLOOR),
                           static_cast<uint32_t>(i), low);
@@ -234,7 +273,6 @@ Status admit(const kine::Geom &g,
         }
 
         if (field.ok()) {
-            body.volume(g, path[i], scratch, vol);
             const int hit = check::firstBlocked(field, vol);
             if (hit >= 0) {
                 std::snprintf(buf, sizeof(buf), "%s: the %s does, at waypoint %u of %u",
@@ -243,19 +281,6 @@ Status admit(const kine::Geom &g,
                 why = buf;
                 return Status::OBSTACLE;
             }
-        }
-
-        for (int j = 0; j < kine::DOF; ++j) {
-            const double wire = kine::toWire(kp, j, path[i][j]);
-            if (wire >= kp.wire_lo_deg[j] && wire <= kp.wire_hi_deg[j]) {
-                continue;
-            }
-            std::snprintf(buf, sizeof(buf),
-                          "waypoint %u would need joint %d at %.2f deg, outside the [%.2f, %.2f] "
-                          "the arm accepts. This usually means zero_offset_deg is uncalibrated.",
-                          static_cast<uint32_t>(i), j, wire, kp.wire_lo_deg[j], kp.wire_hi_deg[j]);
-            why = buf;
-            return Status::LIMIT;
         }
     }
 

@@ -4,6 +4,7 @@
 #define N_TASK_PICK_H
 
 #include <n_check/Grasp.h>
+#include <n_ctrl/Params.h>
 
 #include <string>
 #include <vector>
@@ -44,9 +45,18 @@ Choice choose(const kine::Geom &g,
               const check::Body &b,
               const check::Field &f,
               const check::Ask &policy,
+              const ctrl::Params &motion,
               const std::vector<Candidate> &candidates,
               const kine::Joints &seed,
               std::vector<kine::Vec3> &scratch);
+
+check::Block drivable(const kine::Geom &g,
+                      const check::Body &b,
+                      const check::Field &f,
+                      const ctrl::Params &motion,
+                      const kine::Joints &from,
+                      const check::Hold &h,
+                      std::vector<kine::Vec3> &scratch);
 
 // "3 unreachable, 1 no_clocking" — what stopped the ones that failed.
 std::string tally(const std::vector<check::Block> &per);

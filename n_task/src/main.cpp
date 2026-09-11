@@ -23,13 +23,15 @@ int main(int argc, char **argv) {
     // The same file, the same `arm` and `jaws` sections, the same loader as
     // n_ctrl. That is what stops the two describing different arms.
     conf::Doc doc;
-    doc.load(config, {"world", "arm", "jaws", "task"}, {"driver"});
+    doc.load(config, {"world", "arm", "jaws", "task"}, {"driver", "ctrl"});
 
     task::Params  p;
+    ctrl::Params  motion;
     kine::Params  arm;
     check::Jaws   jaws;
     reach::Limits limits;
     p.load(doc);
+    motion.load(doc);
     arm.load(doc);
     jaws.load(doc);
     limits.load(doc);
@@ -39,10 +41,19 @@ int main(int argc, char **argv) {
         LOG_ERROR("[task] %s is not usable:\n%s", config.c_str(), doc.report().c_str());
         return -1;
     }
+    if (p.missing() != NULL) {
+        LOG_ERROR("[task] %s: %s is missing or not a usable value", config.c_str(), p.missing());
+        return -1;
+    }
+    if (motion.missing() != NULL) {
+        LOG_ERROR("[task] %s: %s is missing or not a usable value", config.c_str(),
+                  motion.missing());
+        return -1;
+    }
 
     LOG_INFO("[task] config %s\n%s", config.c_str(), doc.effective().c_str());
 
-    task::Node node(p, arm, jaws, limits, field_path);
+    task::Node node(p, motion, arm, jaws, limits, field_path);
     LOG_INFO("[task] ready");
 
     ROS_ASYNC_SPIN(2)
