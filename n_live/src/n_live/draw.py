@@ -79,7 +79,8 @@ class Board(object):
         self.every = every
         self.pub = dict((name, rospy.Publisher("viz/" + name, kind, queue_size=1, latch=True))
                         for name, kind in (("field", PointCloud2), ("obstacle", PointCloud2),
-                                           ("cloud", PointCloud2), ("scene", PointCloud2),
+                                           ("cloud", PointCloud2), ("target", PointCloud2),
+                                           ("scene", PointCloud2),
                                            ("candidates", PoseArray)))
 
     def show(self, field_path, r):
@@ -89,7 +90,11 @@ class Board(object):
         f = r["frame"]
         self.pub["field"].publish(cloud(header, cells(head, names.index("upper_arm"), self.stride)))
         self.pub["obstacle"].publish(cloud(header, cells(head, names.index("jaw"), self.stride)))
-        self.pub["cloud"].publish(cloud(header, f.to_arm(f.points[::self.every])))
+        idx, inside = occ.world_to_index(f.points, r["lo"], head["res"], r["label"].shape)
+        is_target = np.zeros(len(f.points), dtype=bool)
+        is_target[inside] = r["label"][tuple(idx[inside].T)] == occ.TARGET
+        self.pub["cloud"].publish(cloud(header, f.to_arm(f.points[~is_target][::self.every])))
+        self.pub["target"].publish(cloud(header, f.to_arm(f.points[is_target])))
         seen = np.argwhere(np.isin(r["label"], (occ.OBSTACLE, occ.TARGET)))
         self.pub["scene"].publish(cloud(header, f.to_arm(r["lo"] + (seen + 0.5) * head["res"])))
         self.pub["candidates"].publish(arrows(header, r["cand"][r["keep"]]))
