@@ -226,11 +226,10 @@ bool Node::moveToPose(const kine::Joints &goal, std::string &why) {
 // and the roll are what the gate solved, and holding them is the point.
 bool Node::moveAlong(const kine::Vec3 &to, std::string &why) {
     ctrl::Leg leg;
-    leg.start      = hold_.standoff_point;
-    leg.target     = to;
-    leg.q_wrist    = hold_.joints[kine::WRIST];
-    leg.facing_out = hold_.facing_out;
-    leg.elbow_up   = hold_.elbow_up;
+    leg.start    = hold_.standoff_point;
+    leg.target   = to;
+    leg.q_wrist  = hold_.joints[kine::WRIST];
+    leg.elbow_up = hold_.elbow_up;
 
     Srv_SetFloat32Array srv;
     srv.request.data = ctrl::encodeLeg(leg);

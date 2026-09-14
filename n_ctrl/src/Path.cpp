@@ -166,11 +166,10 @@ Status planLine(const kine::Geom &g,
     }
 
     Leg leg;
-    leg.start      = kine::forward(g, from).throat;
-    leg.target     = target;
-    leg.q_wrist    = from[kine::WRIST];
-    leg.facing_out = chosen.facing_out;
-    leg.elbow_up   = chosen.elbow_up;
+    leg.start    = kine::forward(g, from).throat;
+    leg.target   = target;
+    leg.q_wrist  = from[kine::WRIST];
+    leg.elbow_up = chosen.elbow_up;
     return planLine(g, p, from, leg, out, deviation_m);
 }
 
@@ -199,8 +198,7 @@ Status planLine(const kine::Geom &g,
         const kine::Vec3 at = leg.start + span * u;
 
         kine::Joints     q;
-        const kine::Fail bad = kine::solve(g, at, g.throatAlong(), leg.facing_out, leg.elbow_up,
-                                           solved.back(), q);
+        const kine::Fail bad = kine::solve(g, at, g.throatAlong(), leg.elbow_up, solved.back(), q);
         if (bad != kine::Fail::NONE) {
             return statusFor(bad);
         }

@@ -283,11 +283,10 @@ int main(int argc, char **argv) {
             expect(worst < 1e-9, "leg 1 lands on the standoff posture exactly");
 
             Leg leg;
-            leg.start      = h.standoff_point;
-            leg.target     = h.point;
-            leg.q_wrist    = h.joints[kine::WRIST];
-            leg.facing_out = h.facing_out;
-            leg.elbow_up   = h.elbow_up;
+            leg.start    = h.standoff_point;
+            leg.target   = h.point;
+            leg.q_wrist  = h.joints[kine::WRIST];
+            leg.elbow_up = h.elbow_up;
 
             Leg         wired;
             std::string decode_why;

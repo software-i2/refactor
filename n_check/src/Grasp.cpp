@@ -12,7 +12,7 @@ namespace check {
 namespace {
 
 constexpr double kUnitEps  = 1e-9;
-constexpr int    kPostures = 4;
+constexpr int    kPostures = 2;
 constexpr int    kAimTries = 8;
 constexpr double kAimTol   = 1e-6;
 
@@ -55,7 +55,6 @@ bool aim(const kine::Geom &g,
          const kine::Vec3 &point,
          double back,
          const kine::Vec3 &guess,
-         bool facing_out,
          bool elbow_up,
          const kine::Joints &seed,
          kine::Branch &out,
@@ -63,7 +62,7 @@ bool aim(const kine::Geom &g,
 
     target = point - guess * back;
     for (int i = 0;; ++i) {
-        if (kine::solve(g, target, g.throatAlong(), facing_out, elbow_up, seed, out.q)
+        if (kine::solve(g, target, g.throatAlong(), elbow_up, seed, out.q)
             != kine::Fail::NONE) {
             return false;
         }
@@ -74,8 +73,7 @@ bool aim(const kine::Geom &g,
         }
         target = next;
     }
-    out.facing_out = facing_out;
-    out.elbow_up   = elbow_up;
+    out.elbow_up = elbow_up;
     return true;
 }
 
@@ -192,25 +190,23 @@ Hold holdable(const kine::Geom &g,
         deepest = shallow = nominal;
     }
 
-    const int facings = std::hypot(ask.point.x, ask.point.y) < kUnitEps ? 1 : 2;
-
     Block worst = Block::NONE;
     Hold  best[kPostures];
-    bool  settled[kPostures] = {false, false, false, false};
+    bool  settled[kPostures] = {false, false};
 
     // Try the deepest valid hold first; the throat opens toward the tip, so it is
     // the most forgiving clearance point.
     for (double depth = deepest; depth >= shallow - 1e-9; depth -= step) {
         const double back = depth - nominal;
 
-        for (int p = 0; p < 2 * facings; ++p) {
+        for (int p = 0; p < kPostures; ++p) {
             if (settled[p]) {
                 continue;
             }
 
             kine::Branch br;
             kine::Vec3   target;
-            if (!aim(g, ask.point, back, want, p < 2, p % 2 == 1, seed, br, target)) {
+            if (!aim(g, ask.point, back, want, p == 1, seed, br, target)) {
                 worst = worse(worst, Block::UNREACHABLE);
                 continue;
             }
@@ -252,8 +248,8 @@ Hold holdable(const kine::Geom &g,
                 const kine::Vec3 back_off = target - br.approach * ask.standoff_m;
 
                 kine::Joints stand;
-                if (kine::solve(g, back_off, g.throatAlong(), br.facing_out, br.elbow_up, hold,
-                                stand) != kine::Fail::NONE) {
+                if (kine::solve(g, back_off, g.throatAlong(), br.elbow_up, hold, stand)
+                    != kine::Fail::NONE) {
                     worst = worse(worst, Block::NO_STANDOFF);
                     continue;
                 }
@@ -271,7 +267,6 @@ Hold holdable(const kine::Geom &g,
                 h.wrist_margin_rad = std::min(q_wrist - g.windowLo(kine::WRIST),
                                               g.windowHi(kine::WRIST) - q_wrist);
                 h.travel           = kine::travel(g, seed, stand);
-                h.facing_out       = br.facing_out;
                 h.elbow_up         = br.elbow_up;
 
                 if (settled[p] && h.travel >= best[p].travel) {

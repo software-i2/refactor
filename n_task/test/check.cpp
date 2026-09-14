@@ -242,11 +242,10 @@ int main(int argc, char **argv) {
             expect(off < 1e-5, "the handle sits on the jaw axis the jaws arrive along");
 
             ctrl::Leg leg;
-            leg.start      = c.hold.standoff_point;
-            leg.target     = c.hold.point;
-            leg.q_wrist    = c.hold.joints[kine::WRIST];
-            leg.facing_out = c.hold.facing_out;
-            leg.elbow_up   = c.hold.elbow_up;
+            leg.start    = c.hold.standoff_point;
+            leg.target   = c.hold.point;
+            leg.q_wrist  = c.hold.joints[kine::WRIST];
+            leg.elbow_up = c.hold.elbow_up;
 
             bool        drives = true;
             std::string admit_why;

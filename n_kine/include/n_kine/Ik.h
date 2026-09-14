@@ -20,13 +20,12 @@ const char *reason(Fail f);
 // names the real obstruction rather than the first one tried.
 Fail worse(Fail a, Fail b);
 
-// One posture that puts the tool point on the target. The arm can face the
-// target or reach back over itself, with the elbow either way up.
+// One posture that puts the tool point on the target. The base always faces
+// the target, with the elbow either way up.
 struct Branch {
     Joints q{};
     Vec3   approach;
-    bool   facing_out = true;
-    bool   elbow_up   = false;
+    bool   elbow_up = false;
 };
 
 // `along` is the tool point being aimed, measured from the axis_b pivot:
@@ -34,12 +33,11 @@ struct Branch {
 Fail solve(const Geom &g,
            const Vec3 &target,
            double along,
-           bool facing_out,
            bool elbow_up,
            const Joints &seed,
            Joints &out);
 
-// Every posture that reaches the target, up to four.
+// Every posture that reaches the target, up to two.
 void branches(const Geom &g,
               const Vec3 &target,
               double along,

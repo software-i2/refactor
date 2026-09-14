@@ -71,8 +71,7 @@ struct Hold {
     double wrist_margin_rad = 0.0;
     double travel           = 0.0;
 
-    bool facing_out = true;
-    bool elbow_up   = false;
+    bool elbow_up = false;
 
     bool ok() const { return block == Block::NONE; }
 };

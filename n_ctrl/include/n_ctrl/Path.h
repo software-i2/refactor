@@ -24,13 +24,12 @@ using Path = std::vector<kine::Joints>;
 struct Leg {
     kine::Vec3 start;
     kine::Vec3 target;
-    double     q_wrist    = kine::NONE;
-    bool       facing_out = true;
-    bool       elbow_up   = false;
+    double     q_wrist  = kine::NONE;
+    bool       elbow_up = false;
 };
 
 inline std::vector<float> encodeLeg(const Leg &leg) {
-    std::vector<float> data(9);
+    std::vector<float> data(8);
     data[0] = static_cast<float>(leg.start.x);
     data[1] = static_cast<float>(leg.start.y);
     data[2] = static_cast<float>(leg.start.z);
@@ -38,18 +37,17 @@ inline std::vector<float> encodeLeg(const Leg &leg) {
     data[4] = static_cast<float>(leg.target.y);
     data[5] = static_cast<float>(leg.target.z);
     data[6] = static_cast<float>(leg.q_wrist);
-    data[7] = leg.facing_out ? 1.0f : 0.0f;
-    data[8] = leg.elbow_up ? 1.0f : 0.0f;
+    data[7] = leg.elbow_up ? 1.0f : 0.0f;
     return data;
 }
 
 inline bool decodeLeg(const std::vector<float> &data, Leg &out, std::string &why) {
     char buf[224];
-    if (data.size() != 9) {
+    if (data.size() != 8) {
         std::snprintf(buf, sizeof(buf),
-                      "a grasp leg is 9 values (start xyz, target xyz, wrist_rad, facing_out, "
-                      "elbow_up), got %u. Three values is a bare point, which cannot say how to "
-                      "hold the jaws.",
+                      "a grasp leg is 8 values (start xyz, target xyz, wrist_rad, elbow_up), "
+                      "got %u. Three values is a bare point, which cannot say how to hold the "
+                      "jaws.",
                       static_cast<uint32_t>(data.size()));
         why = buf;
         return false;
@@ -63,11 +61,10 @@ inline bool decodeLeg(const std::vector<float> &data, Leg &out, std::string &why
         }
     }
 
-    out.start      = {data[0], data[1], data[2]};
-    out.target     = {data[3], data[4], data[5]};
-    out.q_wrist    = data[6];
-    out.facing_out = data[7] != 0.0f;
-    out.elbow_up   = data[8] != 0.0f;
+    out.start    = {data[0], data[1], data[2]};
+    out.target   = {data[3], data[4], data[5]};
+    out.q_wrist  = data[6];
+    out.elbow_up = data[7] != 0.0f;
     return true;
 }
 

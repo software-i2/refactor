@@ -122,7 +122,6 @@ bool fitToWindow(const Geom &g, int joint, double q, double seed, double &out) {
 Fail solve(const Geom &g,
            const Vec3 &target,
            double along,
-           bool facing_out,
            bool elbow_up,
            const Joints &seed,
            Joints &out) {
@@ -131,12 +130,11 @@ Fail solve(const Geom &g,
         return Fail::BAD_PARAMS;
     }
 
-    // The tool point is on the wrist axis, so the base either points at the
-    // target or turns away and the arm reaches back over itself.
+    // The tool point is on the wrist axis, so the base points at the target.
     const double radial = std::hypot(target.x, target.y);
     double       raw_base = seed[BASE];
     if (radial >= kGeomEps) {
-        raw_base = std::atan2(target.y, target.x) - (facing_out ? 0.0 : M_PI);
+        raw_base = std::atan2(target.y, target.x);
     }
 
     double q_base = 0.0;
@@ -147,7 +145,7 @@ Fail solve(const Geom &g,
     double     q_shoulder = 0.0;
     double     q_elbow    = 0.0;
     const Fail f          = solvePlanar(g,
-                               facing_out ? radial : -radial,
+                               radial,
                                target.z - g.params().base_to_e_z,
                                g.forearm(along),
                                seed,
@@ -179,22 +177,16 @@ void branches(const Geom &g,
         return;
     }
 
-    // Straight above the base there is only one facing.
-    const int facings = std::hypot(target.x, target.y) < kGeomEps ? 1 : 2;
-
-    for (int f = 0; f < facings; ++f) {
-        for (int e = 0; e < 2; ++e) {
-            Branch     b;
-            const Fail bad = solve(g, target, along, f == 0, e == 1, seed, b.q);
-            if (bad != Fail::NONE) {
-                why = worse(why, bad);
-                continue;
-            }
-            b.approach   = frame(g, b.q).approach;
-            b.facing_out = f == 0;
-            b.elbow_up   = e == 1;
-            out.push_back(b);
+    for (int e = 0; e < 2; ++e) {
+        Branch     b;
+        const Fail bad = solve(g, target, along, e == 1, seed, b.q);
+        if (bad != Fail::NONE) {
+            why = worse(why, bad);
+            continue;
         }
+        b.approach = frame(g, b.q).approach;
+        b.elbow_up = e == 1;
+        out.push_back(b);
     }
 
     if (out.empty() && rank(why) == 0) {

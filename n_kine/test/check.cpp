@@ -107,7 +107,7 @@ int main(int argc, char **argv) {
 
     // Refusals are specific.
     Joints out;
-    check(solve(g, {5.0, 0.0, 0.1}, g.throatAlong(), true, false, rest, out) == Fail::TOO_FAR,
+    check(solve(g, {5.0, 0.0, 0.1}, g.throatAlong(), false, rest, out) == Fail::TOO_FAR,
           "far target reports TOO_FAR");
 
     // Every solved joint is inside its window.
