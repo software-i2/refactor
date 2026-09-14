@@ -15,7 +15,7 @@ MAGIC = b"BXFIELD4"
 _HEADER_BYTES = 8 + 24 + 24 + 12 + 4 + 8 + 24 + 24
 
 
-def digest(ply_path, json_path, res, delta, xyz, links, filt=()):
+def digest(ply_path, json_path, res, delta, xyz, links, filt=(), rpy=None):
     """Stable input fingerprint for a scene field."""
     h = hashlib.sha256()
     for path in (ply_path, json_path):
@@ -28,6 +28,8 @@ def digest(ply_path, json_path, res, delta, xyz, links, filt=()):
     for name, radius in links:
         h.update(name.encode("utf-8"))
         h.update(np.float64(radius).tobytes())
+    if rpy is not None and np.any(np.asarray(rpy, dtype=float) != 0.0):
+        h.update(np.asarray(rpy, dtype="<f8").tobytes())
     return int(np.frombuffer(h.digest()[:8], dtype="<u8")[0])
 
 
@@ -41,10 +43,10 @@ def read_header(path):
         nlinks = int(np.frombuffer(f.read(4), "<i4")[0])
         stamp = int(np.frombuffer(f.read(8), "<u8")[0])
         xyz = np.frombuffer(f.read(24), "<f8").copy()
-        f.read(24)  # placement_rpy, always zero
+        rpy = np.frombuffer(f.read(24), "<f8").copy()
         radii = np.frombuffer(f.read(8 * nlinks), "<f8").copy()
     return {"res": float(res), "step": float(step), "lo": lo, "dims": dims,
-            "digest": stamp, "xyz": xyz, "radii": radii}
+            "digest": stamp, "xyz": xyz, "rpy": rpy, "radii": radii}
 
 
 def read_field(path):
@@ -62,7 +64,7 @@ def read_field(path):
     return head
 
 
-def write_field(path, packed, lo, res, step, radii, xyz, stamp):
+def write_field(path, packed, lo, res, step, radii, xyz, stamp, rpy=None):
     dims = np.asarray(packed.shape, dtype=np.int64)
     with open(path, "wb") as f:
         f.write(MAGIC)
@@ -74,7 +76,7 @@ def write_field(path, packed, lo, res, step, radii, xyz, stamp):
         f.write(np.int32(len(radii)).tobytes())
         f.write(np.uint64(stamp).tobytes())
         f.write(np.asarray(xyz, dtype="<f8").tobytes())
-        f.write(np.zeros(3, dtype="<f8").tobytes())   # placement_rpy
+        f.write(np.asarray((0.0, 0.0, 0.0) if rpy is None else rpy, dtype="<f8").tobytes())
         f.write(np.asarray(radii, dtype="<f8").tobytes())
         f.write(np.ascontiguousarray(packed, dtype=np.uint8).tobytes())
     return dims

@@ -93,9 +93,9 @@ def main():
     rospy.init_node("n_pcloud_viz")
     head = read_field(args.field)
     at = head["xyz"]
-    rospy.loginfo("[viz] %s: %s cells at %.0f mm, camera at %s, digest %016x",
+    rospy.loginfo("[viz] %s: %s cells at %.0f mm, camera at %s rpy %s, digest %016x",
                   args.field, tuple(head["dims"]), head["res"] * 1000,
-                  np.round(at, 3), head["digest"])
+                  np.round(at, 3), np.round(head["rpy"], 2), head["digest"])
 
     links = field.links_for(head["res"])
     names = [n for n, _r in links]
@@ -128,7 +128,7 @@ def main():
         ply = os.path.join(args.data, "ply", "%s_depth_scene.ply" % args.scene)
         js = os.path.join(args.data, "json", "%s_depth_poses.json" % args.scene)
         # Placed at the field's own placement, not one given again here.
-        f = frame.read(args.scene, ply, js, at)
+        f = frame.read(args.scene, ply, js, at, head["rpy"])
         cand = features.candidates(f)
 
         handle = occ.near_grasps(f.points, f.pos, res=head["res"])

@@ -31,8 +31,14 @@ bool openField(const std::string &path, Field &field, std::vector<Note> &out) {
 
     const kine::Vec3 lo = field.lo();
     const kine::Vec3 hi = field.hi();
-    const kine::Vec3 at = field.placement();
-    char             buf[352];
+    const kine::Vec3 at  = field.placement();
+    const kine::Vec3 rpy = field.placementRpy();
+    char             buf[416];
+    char             tilt[96] = "";
+
+    if (rpy.x != 0.0 || rpy.y != 0.0 || rpy.z != 0.0) {
+        std::snprintf(tilt, sizeof(tilt), " --rpy \"%g %g %g\"", rpy.x, rpy.y, rpy.z);
+    }
 
     std::snprintf(buf, sizeof(buf), "obstacle field on: %s, %.1f MB, %.0f mm voxels, %llu occupied",
                   field.source().c_str(), field.bytes() / 1e6, field.res() * 1000.0,
@@ -45,9 +51,9 @@ bool openField(const std::string &path, Field &field, std::vector<Note> &out) {
 
     std::snprintf(buf, sizeof(buf),
                   "  built from %016llx, placed at (%.3f, %.3f, %.3f). Confirm it is current "
-                  "with: rosrun n_pcloud scene.py --scene <id> --at \"%.3f %.3f %.3f\" --check %s",
+                  "with: rosrun n_pcloud scene.py --scene <id> --at \"%.3f %.3f %.3f\"%s --check %s",
                   static_cast<unsigned long long>(field.digest()), at.x, at.y, at.z,
-                  at.x, at.y, at.z, field.source().c_str());
+                  at.x, at.y, at.z, tilt, field.source().c_str());
     say(out, Note::INFO, buf);
 
     if (field.empty()) {

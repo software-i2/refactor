@@ -31,6 +31,7 @@ public:
     kine::Vec3 lo() const;
     kine::Vec3 hi() const;
     kine::Vec3 placement() const;
+    kine::Vec3 placementRpy() const;
 
     double   res() const { return res_; }
     double   step() const { return step_; }
@@ -55,6 +56,7 @@ private:
     int32_t  dims_[3] = {0, 0, 0};
     double   radii_[N_LINKS] = {0.0, 0.0, 0.0, 0.0, 0.0};
     double   placement_[3] = {0.0, 0.0, 0.0};
+    double   rpy_[3]       = {0.0, 0.0, 0.0};
     uint64_t digest_   = 0;
     uint64_t occupied_ = 0;
 

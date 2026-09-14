@@ -19,12 +19,14 @@ from n_pcloud import occupancy as occ
 from n_pcloud.field_format import digest, read_header
 
 
-def placement(text):
-    parts = text.replace(",", " ").split()
-    if len(parts) != 3:
-        raise argparse.ArgumentTypeError(
-            "--at needs three numbers, \"X Y Z\" in metres, got %r" % text)
-    return [float(v) for v in parts]
+def triple(flag, shape):
+    def parse(text):
+        parts = text.replace(",", " ").split()
+        if len(parts) != 3:
+            raise argparse.ArgumentTypeError(
+                "%s needs three numbers, %s, got %r" % (flag, shape, text))
+        return [float(v) for v in parts]
+    return parse
 
 
 def scene_paths(args):
@@ -46,8 +48,12 @@ def main():
     ap.add_argument("--data", default="data", help="folder holding ply/ and json/")
     ap.add_argument("--ply", help="explicit cloud, instead of --scene")
     ap.add_argument("--json", help="explicit poses, instead of --scene")
-    ap.add_argument("--at", type=placement, required=True,
+    ap.add_argument("--at", type=triple("--at", '"X Y Z" in metres'), required=True,
                     metavar='"X Y Z"', help="camera origin in arm_base, metres. Required.")
+    ap.add_argument("--rpy", type=triple("--rpy", '"R P Y" in degrees'), default=[0.0, 0.0, 0.0],
+                    metavar='"R P Y"',
+                    help="extra camera rotation about arm_base x, y, z, degrees, applied "
+                         "after the fixed optical-to-arm swap and pivoting on --at")
     ap.add_argument("--res", type=float, default=0.005, help="working voxel size")
     ap.add_argument("--step", type=float, default=0.002, help="axis sample spacing n_check walks")
     ap.add_argument("--reach-max", type=float, default=0.35, dest="reach_max",
@@ -67,27 +73,29 @@ def main():
     filt = () if args.raw else (occ.SUPPORT_TOL, occ.SUPPORT_MIN,
                                 occ.SUPPORT_WINDOW, occ.CARVE_MIN_HITS,
                                 occ.HANDLE_RADIUS)
-    stamp = digest(ply_path, json_path, args.res, args.step, args.at, links, filt)
+    stamp = digest(ply_path, json_path, args.res, args.step, args.at, links, filt, args.rpy)
 
     if args.check:
         head = read_header(args.check)
         print("%s" % args.check)
         print("  built from  %016x" % head["digest"])
-        print("  these input %016x  (placed at %s)" % (stamp, np.round(args.at, 3)))
+        print("  these input %016x  (placed at %s, rpy %s)"
+              % (stamp, np.round(args.at, 3), np.round(args.rpy, 2)))
         if head["digest"] == stamp:
             print("  FRESH")
             return 0
         print("  STALE: the arm would check a world that no longer matches the inputs.")
-        print("  placed at %s when it was built" % np.round(head["xyz"], 3))
+        print("  placed at %s, rpy %s when it was built"
+              % (np.round(head["xyz"], 3), np.round(head["rpy"], 2)))
         return 3
 
     t0 = time.time()
-    f = frame.read(name, ply_path, json_path, args.at)
+    f = frame.read(name, ply_path, json_path, args.at, args.rpy)
     print("%s" % name)
     print("  %s" % ply_path)
     print("  %s" % json_path)
-    print("  %d points, %d poses, camera at %s in arm_base"
-          % (len(f.points), len(f.pos), np.round(f.at, 3)))
+    print("  %d points, %d poses, camera at %s rpy %s in arm_base"
+          % (len(f.points), len(f.pos), np.round(f.at, 3), np.round(f.rpy, 2)))
 
     keep_mask, handle_mask, hit_threshold = None, None, 1
     if not args.raw:
@@ -110,6 +118,11 @@ def main():
         print("  WARNING: no handle voxels carved. The poses do not land on anything the")
         print("  camera saw, which usually means --at is wrong for this capture.")
 
+    if field.tilted(args.rpy):
+        label, lo = field.place(label, lo, args.res, args.at, args.rpy)
+        print("  resampled into arm_base for rpy %s: grid %s" % (np.round(args.rpy, 2),
+                                                               tuple(label.shape)))
+
     built = field.build(label, lo, args.res, args.step)
     print("  blades sampled every %.1f mm, jaw dilated %.1f mm, arm %.1f mm"
           % (field.blade_pitch(args.res) * 1000, links[-1][1] * 1000, links[0][1] * 1000))
@@ -120,7 +133,7 @@ def main():
           % (int(keep.sum()), len(cand)))
 
     if args.out:
-        size, arm_lo, dims = field.export(args.out, built, args.at, stamp)
+        size, arm_lo, dims = field.export(args.out, built, args.at, stamp, args.rpy)
         hi = arm_lo + dims * built["res"]
         print("  wrote %s (%.1f MB), digest %016x" % (args.out, size / 1e6, stamp))
         print("    arm_base x %.3f..%.3f  y %.3f..%.3f  z %.3f..%.3f"

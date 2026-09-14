@@ -96,10 +96,24 @@ def load_poses(path):
     return np.asarray(pos, dtype=float), np.asarray(rot, dtype=float)
 
 
+def mount(rpy_deg):
+    r, p, y = np.deg2rad(np.asarray(rpy_deg, dtype=float))
+    rx = np.array([[1.0, 0.0, 0.0], [0.0, np.cos(r), -np.sin(r)], [0.0, np.sin(r), np.cos(r)]])
+    ry = np.array([[np.cos(p), 0.0, np.sin(p)], [0.0, 1.0, 0.0], [-np.sin(p), 0.0, np.cos(p)]])
+    rz = np.array([[np.cos(y), -np.sin(y), 0.0], [np.sin(y), np.cos(y), 0.0], [0.0, 0.0, 1.0]])
+    return rz.dot(ry).dot(rx)
+
+
+def cam_to_arm(rpy_deg=None):
+    if rpy_deg is None:
+        return CAM_TO_ARM
+    return mount(rpy_deg).dot(CAM_TO_ARM)
+
+
 class Frame(object):
     """A cloud and set of grasp poses in arm_base coordinates."""
 
-    def __init__(self, name, points, pos, rot, at):
+    def __init__(self, name, points, pos, rot, at, rpy=None):
         self.name = name
         self.points = points        # (N, 3) camera frame
         self.pos = pos              # (M, 3) camera frame
@@ -107,16 +121,20 @@ class Frame(object):
         self.at = np.asarray(at, dtype=float)
         if self.at.shape != (3,):
             raise ValueError("placement must be three numbers, got %r" % (at,))
+        self.rpy = np.zeros(3) if rpy is None else np.asarray(rpy, dtype=float)
+        if self.rpy.shape != (3,):
+            raise ValueError("rpy must be three numbers, got %r" % (rpy,))
+        self.R = cam_to_arm(self.rpy)
 
     def to_arm(self, v):
         """Camera frame to arm_base, for points."""
-        return np.asarray(v, dtype=float).dot(CAM_TO_ARM.T) + self.at
+        return np.asarray(v, dtype=float).dot(self.R.T) + self.at
 
     def directions_to_arm(self, v):
         """Directions carry no translation."""
-        return np.asarray(v, dtype=float).dot(CAM_TO_ARM.T)
+        return np.asarray(v, dtype=float).dot(self.R.T)
 
 
-def read(name, ply_path, json_path, at):
+def read(name, ply_path, json_path, at, rpy=None):
     pos, rot = load_poses(json_path)
-    return Frame(name, load_ply(ply_path), pos, rot, at)
+    return Frame(name, load_ply(ply_path), pos, rot, at, rpy)

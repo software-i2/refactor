@@ -24,6 +24,7 @@ void Field::clear() {
     digest_   = 0;
     dims_[0] = dims_[1] = dims_[2] = 0;
     placement_[0] = placement_[1] = placement_[2] = 0.0;
+    rpy_[0] = rpy_[1] = rpy_[2] = 0.0;
     data_.clear();
     source_.clear();
 }
@@ -40,12 +41,11 @@ bool Field::load(const std::string &path, std::string &err) {
     char    magic[8];
     int32_t nlinks   = 0;
     double  unused   = 0.0;  // was the dilation margin, always 0 since it was dropped
-    double  rpy[3]   = {0.0, 0.0, 0.0};
 
     bool read = readAll(f, magic, 8) && std::memcmp(magic, kMagic, 8) == 0;
     read = read && readAll(f, &res_, 1) && readAll(f, &step_, 1) && readAll(f, &unused, 1);
     read = read && readAll(f, lo_, 3) && readAll(f, dims_, 3) && readAll(f, &nlinks, 1);
-    read = read && readAll(f, &digest_, 1) && readAll(f, placement_, 3) && readAll(f, rpy, 3);
+    read = read && readAll(f, &digest_, 1) && readAll(f, placement_, 3) && readAll(f, rpy_, 3);
     read = read && readAll(f, radii_, N_LINKS);
 
     if (!read) {
@@ -101,6 +101,8 @@ kine::Vec3 Field::hi() const {
 }
 
 kine::Vec3 Field::placement() const { return {placement_[0], placement_[1], placement_[2]}; }
+
+kine::Vec3 Field::placementRpy() const { return {rpy_[0], rpy_[1], rpy_[2]}; }
 
 bool Field::blocked(const kine::Vec3 &p, int link) const {
     if (!ok_ || link < 0 || link >= N_LINKS) {
