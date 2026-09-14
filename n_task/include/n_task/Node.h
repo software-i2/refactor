@@ -9,6 +9,7 @@
 #include <n_task/Params.h>
 #include <n_task/Pick.h>
 #include <sensor_msgs/JointState.h>
+#include <std_msgs/String.h>
 
 #include <memory>
 #include <mutex>
@@ -27,6 +28,13 @@ enum class Step : uint8_t {
 
 const char *name(Step s);
 
+enum class Grip : uint8_t {
+    NONE = 0,
+    CLOSING,
+    HELD,
+    EMPTY
+};
+
 class Node {
 public:
     Node(const Params &p, const ctrl::Params &motion, const kine::Params &arm,
@@ -37,8 +45,11 @@ public:
 private:
     void onStates(const sensor_msgs::JointState::ConstPtr &msg);
     void onCtrlState(const Msg_UInt8::ConstPtr &msg);
+    void onFrame(const std_msgs::String::ConstPtr &msg);
+    void onCtrlField(const Msg_UInt64::ConstPtr &msg);
 
     bool onPlan(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res);
+    bool onPlanLive(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
     bool onPreview(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
     bool onStart(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
     bool onPick(Srv_SetFloat32Array_Request &req, Srv_SetFloat32Array_Response &res);
@@ -54,20 +65,28 @@ private:
 
     bool goStandoff(std::string &why);
     bool goGrasp(std::string &why);
+    bool sameWorld(std::string &why);
 
     bool moveToPose(const kine::Joints &goal, std::string &why);
     bool moveAlong(const kine::Vec3 &to, std::string &why);
     bool jaw(bool shut, std::string &why);
+    void watchGrip();
     void enter(Step s);
     bool snapshot(kine::Joints &q);
     void loadField(const std::string &path);
+    bool openField(const std::string &path, check::Field &field,
+                   std::unique_ptr<check::Body> &body);
 
     DECLARE_ROS_SUBSCRIBER(sub_states_, sensor_msgs::JointState)
     DECLARE_ROS_SUBSCRIBER(sub_ctrl_, Msg_UInt8)
+    DECLARE_ROS_SUBSCRIBER(sub_frame_, std_msgs::String)
+    DECLARE_ROS_SUBSCRIBER(sub_ctrl_field_, Msg_UInt64)
     DECLARE_ROS_PUBLISHER(pub_step_, Msg_UInt8)
     DECLARE_ROS_PUBLISHER(pub_chosen_, Msg_PoseArray)
+    DECLARE_ROS_PUBLISHER(pub_grip_, Msg_UInt8)
 
     DECLARE_ROS_SERVICE_SERVER(srv_plan_, Srv_SetFloat32Array)
+    DECLARE_ROS_SERVICE_SERVER(srv_plan_live_, Srv_Trigger)
     DECLARE_ROS_SERVICE_SERVER(srv_preview_, Srv_Trigger)
     DECLARE_ROS_SERVICE_SERVER(srv_start_, Srv_Trigger)
     DECLARE_ROS_SERVICE_SERVER(srv_pick_, Srv_SetFloat32Array)
@@ -83,6 +102,7 @@ private:
     DECLARE_ROS_SERVICE_CLIENT(cli_ctrl_stop_, Srv_Trigger)
     DECLARE_ROS_SERVICE_CLIENT(cli_close_jaw_, Srv_Trigger)
     DECLARE_ROS_SERVICE_CLIENT(cli_open_jaw_, Srv_Trigger)
+    DECLARE_ROS_SERVICE_CLIENT(cli_load_field_, Srv_SetString)
 
     Params        p_;
     ctrl::Params  motion_;
@@ -101,6 +121,11 @@ private:
     std::mutex   state_mtx_;
     kine::Joints q_{};
     bool         seen_ = false;
+    double       jaw_mm_ = 0.0;
+    ros::Time    jaw_at_;
+    std::string  frame_;
+    uint64_t     ctrl_field_      = 0;
+    bool         ctrl_field_seen_ = false;
 
     check::Hold hold_;
     bool        planned_ = false;
@@ -110,6 +135,11 @@ private:
 
     Step   step_   = Step::IDLE;
     double leg_at_ = 0.0;
+
+    Grip      grip_ = Grip::NONE;
+    ros::Time grip_after_;
+    double    still_mm_ = 0.0;
+    ros::Time still_at_;
 
     ctrl::State ctrl_state_ = ctrl::State::IDLE;
     bool        ctrl_seen_  = false;

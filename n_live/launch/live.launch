@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="config" default="$(find n_conf)/config/arm.yaml"/>
+    <arg name="data" default="$(dirname)/../../../../data/live"/>
+    <arg name="keep" default="5"/>
+    <arg name="draw" default="true"/>
+    <arg name="full" default="false"/>
+    <arg name="cloud" default=""/>
+    <arg name="poses" default="/grasp_poses"/>
+
+    <node name="n_live" pkg="n_live" type="live.py" output="screen">
+        <param name="config" type="str" value="$(arg config)"/>
+        <param name="inbox" type="str" value="$(arg data)/in"/>
+        <param name="out" type="str" value="$(arg data)/out"/>
+        <param name="keep" type="int" value="$(arg keep)"/>
+        <param name="draw" type="bool" value="$(arg draw)"/>
+        <param name="full" type="bool" value="$(arg full)"/>
+    </node>
+
+    <node if="$(eval arg('cloud') != '')" name="n_live_listen" pkg="n_live" type="listen.py"
+          output="screen">
+        <param name="inbox" type="str" value="$(arg data)/in"/>
+        <param name="cloud" type="str" value="$(arg cloud)"/>
+        <param name="poses" type="str" value="$(arg poses)"/>
+    </node>
+</launch>

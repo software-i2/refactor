@@ -6,6 +6,9 @@ world:
   floor_z_m: -1.0e-6
   obstacle_field: "/mnt/d/beex/arm_ws/data/field.bin"
 
+camera:
+  at_m: [0.0, 0.1, 0.0]
+  rpy_deg: [180.0, -90.0, 0.0]
 
 arm:
   base_to_e_z: 0.0140       # base -> axis_e
@@ -83,7 +86,7 @@ ctrl:
 task:
   rate_hz: 5.0
 
-  standoff_m: 0.08
+  standoff_m: 0.04
   max_approach_dev_deg: 30.0
 
   depth_min_m: 0.040
@@ -93,3 +96,7 @@ task:
   leg_samples: 8
   auto_sequence: false
   ctrl_silence_s: 1.0
+
+  jaw_held_mm: 0.5
+  jaw_still_mm: 0.1
+  jaw_settle_s: 1.0

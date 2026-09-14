@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <utility>
 
 namespace ctrl {
 namespace {
@@ -130,6 +131,7 @@ Node::Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
     INIT_ROS_PUBLISHER(pub_state_, Msg_UInt8, "ctrl/state", 1);
     INIT_ROS_PUBLISHER(pub_pose_, Msg_PoseArray, "ctrl/pose", 1);
     INIT_ROS_PUBLISHER(pub_body_, Msg_MarkerArray, "ctrl/collision_body", 1);
+    INIT_ROS_PUBLISHER(pub_field_, Msg_UInt64, "ctrl/field", 1);
     INIT_ROS_SUBSCRIBER(sub_states_, "joint_states", 1, &Node::onStates);
 
     INIT_ROS_SERVICE_SERVER(srv_move_j_, "ctrl/move_j", &Node::onMoveJ);
@@ -141,6 +143,7 @@ Node::Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
     INIT_ROS_SERVICE_SERVER(srv_stop_, "ctrl/stop", &Node::onStop);
     INIT_ROS_SERVICE_SERVER(srv_return_, "ctrl/return", &Node::onReturn);
     INIT_ROS_SERVICE_SERVER(srv_rest_, "ctrl/rest", &Node::onRest);
+    INIT_ROS_SERVICE_SERVER(srv_load_field_, "ctrl/load_field", &Node::onLoadField);
 
     if (!g_.ok()) {
         LOG_ERROR("[ctrl] the arm geometry is unusable (%s); every move will be refused",
@@ -151,13 +154,20 @@ Node::Node(const Params &p, const kine::Params &arm, const check::Jaws &jaws,
 }
 
 void Node::loadField(const std::string &path) {
-    const std::vector<check::Note> notes =
-            check::openScene(path, jaws_, g_, restPose(g_.params(), limits_), field_, body_);
+    openField(path, field_, body_);
+}
 
+bool Node::openField(const std::string &path, check::Field &field,
+                     std::unique_ptr<check::Body> &body) {
+    const std::vector<check::Note> notes =
+            check::openScene(path, jaws_, g_, restPose(g_.params(), limits_), field, body);
+
+    bool usable = field.ok();
     for (size_t i = 0; i < notes.size(); ++i) {
         switch (notes[i].level) {
         case check::Note::ERROR:
             LOG_ERROR("[ctrl] %s", notes[i].text.c_str());
+            usable = false;
             break;
         case check::Note::WARN:
             LOG_WARN("[ctrl] %s", notes[i].text.c_str());
@@ -166,6 +176,7 @@ void Node::loadField(const std::string &path) {
             break;
         }
     }
+    return usable;
 }
 
 void Node::onStates(const sensor_msgs::JointState::ConstPtr &msg) {
@@ -185,6 +196,10 @@ void Node::onStates(const sensor_msgs::JointState::ConstPtr &msg) {
 
 void Node::tick() {
     std::lock_guard<std::mutex> work(work_mtx_);
+
+    Msg_UInt64 field_msg;
+    field_msg.data = field_.ok() ? field_.digest() : 0;
+    PUBLISH_ROS(pub_field_, field_msg);
 
     const double now = reach::nowSec();
 
@@ -567,6 +582,33 @@ bool Node::onRest(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
 
     res.success = m.ok();
     res.message = m.ok() ? "returning to rest" : m.note;
+    return true;
+}
+
+bool Node::onLoadField(Srv_SetString_Request &req, Srv_SetString_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
+    res.success = false;
+    if (exec_.busy() || !trail_.empty()) {
+        LOG_WARN("[ctrl] load_field REFUSED: %s, and it was checked against the field already "
+                 "loaded. Finish with ctrl/return or ctrl/stop first.",
+                 exec_.busy() ? "a move is running" : "the way home is still recorded");
+        return true;
+    }
+
+    check::Field                 field;
+    std::unique_ptr<check::Body> body;
+    if (!openField(req.data, field, body)) {
+        LOG_WARN("[ctrl] load_field REFUSED: %s is not usable, so %s stays loaded",
+                 req.data.c_str(), field_.ok() ? field_.source().c_str() : "no field");
+        return true;
+    }
+
+    std::swap(field_, field);
+    body_.swap(body);
+    LOG_INFO("[ctrl] field now %s, digest %016llx", field_.source().c_str(),
+             static_cast<unsigned long long>(field_.digest()));
+    res.success = true;
     return true;
 }
 

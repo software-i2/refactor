@@ -1,7 +1,25 @@
 <?xml version="1.0"?>
 <robot name="alpha5" xmlns:xacro="http://ros.org/wiki/xacro">
 
+    <xacro:arg name="config" default="$(find n_conf)/config/arm.yaml"/>
+    <xacro:property name="camera" value="${load_yaml('$(arg config)')['camera']}"/>
+
     <link name="arm_base"/>
+
+    <link name="camera_mount"/>
+    <joint name="camera_mount_joint" type="fixed">
+        <parent link="arm_base"/>
+        <child link="camera_mount"/>
+        <origin xyz="${camera['at_m'][0]} ${camera['at_m'][1]} ${camera['at_m'][2]}"
+                rpy="${radians(camera['rpy_deg'][0])} ${radians(camera['rpy_deg'][1])} ${radians(camera['rpy_deg'][2])}"/>
+    </joint>
+
+    <link name="camera_link"/>
+    <joint name="camera_link_joint" type="fixed">
+        <parent link="camera_mount"/>
+        <child link="camera_link"/>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 ${-pi/2}"/>
+    </joint>
 
     <xacro:include filename="$(find n_desc)/alpha.urdf.xacro"/>
 

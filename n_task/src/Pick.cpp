@@ -48,11 +48,6 @@ bool readCandidates(const std::vector<float> &data,
         why = buf;
         return false;
     }
-    if (data.size() / stride < 2) {
-        why = "a handle needs at least two candidates; one point is not a handle";
-        return false;
-    }
-
     const size_t n = data.size() / stride;
     out.reserve(n);
     for (size_t i = 0; i < n; ++i) {

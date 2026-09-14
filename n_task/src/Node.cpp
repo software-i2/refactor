@@ -9,8 +9,54 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <utility>
 
 namespace task {
+namespace {
+
+bool readFloats(const std::string &path, std::vector<float> &out, std::string &why) {
+    std::FILE *f = std::fopen(path.c_str(), "r");
+    if (f == NULL) {
+        why = "cannot open " + path;
+        return false;
+    }
+    std::string text;
+    char        buf[4096];
+    size_t      n = 0;
+    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+        text.append(buf, n);
+    }
+    std::fclose(f);
+
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '[' || text[i] == ']' || text[i] == ',') {
+            text[i] = ' ';
+        }
+    }
+
+    out.clear();
+    const char *p = text.c_str();
+    for (;;) {
+        char        *end = NULL;
+        const double v   = std::strtod(p, &end);
+        if (end == p) {
+            break;
+        }
+        out.push_back(static_cast<float>(v));
+        p = end;
+    }
+    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') {
+        ++p;
+    }
+    if (*p != '\0') {
+        why = path + " is not a list of numbers";
+        return false;
+    }
+    return true;
+}
+
+}  // namespace
 
 const char *name(Step s) {
     switch (s) {
@@ -35,10 +81,14 @@ Node::Node(const Params &p, const ctrl::Params &motion, const kine::Params &arm,
 
     INIT_ROS_PUBLISHER(pub_step_, Msg_UInt8, "task/step", 1);
     INIT_ROS_PUBLISHER(pub_chosen_, Msg_PoseArray, "task/chosen", 1);
+    INIT_ROS_PUBLISHER(pub_grip_, Msg_UInt8, "task/grip", 1);
     INIT_ROS_SUBSCRIBER(sub_states_, "joint_states", 1, &Node::onStates);
     INIT_ROS_SUBSCRIBER(sub_ctrl_, "ctrl/state", 10, &Node::onCtrlState);
+    INIT_ROS_SUBSCRIBER(sub_frame_, "live/frame", 1, &Node::onFrame);
+    INIT_ROS_SUBSCRIBER(sub_ctrl_field_, "ctrl/field", 1, &Node::onCtrlField);
 
     INIT_ROS_SERVICE_SERVER(srv_plan_, "task/plan", &Node::onPlan);
+    INIT_ROS_SERVICE_SERVER(srv_plan_live_, "task/plan_live", &Node::onPlanLive);
     INIT_ROS_SERVICE_SERVER(srv_preview_, "task/preview", &Node::onPreview);
     INIT_ROS_SERVICE_SERVER(srv_start_, "task/start", &Node::onStart);
     INIT_ROS_SERVICE_SERVER(srv_pick_, "task/pick", &Node::onPick);
@@ -54,6 +104,7 @@ Node::Node(const Params &p, const ctrl::Params &motion, const kine::Params &arm,
     INIT_ROS_SERVICE_CLIENT(cli_ctrl_stop_, Srv_Trigger, "ctrl/stop");
     INIT_ROS_SERVICE_CLIENT(cli_close_jaw_, Srv_Trigger, "cmd/close_jaw");
     INIT_ROS_SERVICE_CLIENT(cli_open_jaw_, Srv_Trigger, "cmd/open_jaw");
+    INIT_ROS_SERVICE_CLIENT(cli_load_field_, Srv_SetString, "ctrl/load_field");
 
     if (!g_.ok()) {
         LOG_ERROR("[task] the arm geometry is unusable (%s); no hold can be planned",
@@ -65,13 +116,20 @@ Node::Node(const Params &p, const ctrl::Params &motion, const kine::Params &arm,
 
 // The task and controller use the same field loader; mismatches show up in logs.
 void Node::loadField(const std::string &path) {
-    const std::vector<check::Note> notes =
-            check::openScene(path, jaws_, g_, ctrl::restPose(g_.params(), limits_), field_, body_);
+    openField(path, field_, body_);
+}
 
+bool Node::openField(const std::string &path, check::Field &field,
+                     std::unique_ptr<check::Body> &body) {
+    const std::vector<check::Note> notes =
+            check::openScene(path, jaws_, g_, ctrl::restPose(g_.params(), limits_), field, body);
+
+    bool usable = field.ok();
     for (size_t i = 0; i < notes.size(); ++i) {
         switch (notes[i].level) {
         case check::Note::ERROR:
             LOG_ERROR("[task] %s", notes[i].text.c_str());
+            usable = false;
             break;
         case check::Note::WARN:
             LOG_WARN("[task] %s", notes[i].text.c_str());
@@ -80,6 +138,18 @@ void Node::loadField(const std::string &path) {
             break;
         }
     }
+    return usable;
+}
+
+void Node::onFrame(const std_msgs::String::ConstPtr &msg) {
+    std::lock_guard<std::mutex> lock(state_mtx_);
+    frame_ = msg->data;
+}
+
+void Node::onCtrlField(const Msg_UInt64::ConstPtr &msg) {
+    std::lock_guard<std::mutex> lock(state_mtx_);
+    ctrl_field_      = msg->data;
+    ctrl_field_seen_ = true;
 }
 
 void Node::onStates(const sensor_msgs::JointState::ConstPtr &msg) {
@@ -91,6 +161,13 @@ void Node::onStates(const sensor_msgs::JointState::ConstPtr &msg) {
     std::lock_guard<std::mutex> lock(state_mtx_);
     q_ = q;
     seen_ = true;
+    for (size_t i = 0; i < msg->name.size() && i < msg->position.size(); ++i) {
+        if (msg->name[i] == reach::URDF_NAME[reach::JAW]) {
+            jaw_mm_ = msg->position[i] * 1000.0;
+            jaw_at_ = msg->header.stamp;
+            break;
+        }
+    }
 }
 
 void Node::onCtrlState(const Msg_UInt8::ConstPtr &msg) {
@@ -257,12 +334,61 @@ bool Node::jaw(bool shut, std::string &why) {
                                            : srv.response.message;
         return false;
     }
+    grip_       = shut ? Grip::CLOSING : Grip::NONE;
+    grip_after_ = ROS_TIME_NOW();
+    still_at_   = ros::Time();
     return true;
+}
+
+void Node::watchGrip() {
+    double    mm = 0.0;
+    ros::Time at;
+    {
+        std::lock_guard<std::mutex> lock(state_mtx_);
+        mm = jaw_mm_;
+        at = jaw_at_;
+    }
+    if ((grip_ != Grip::CLOSING && grip_ != Grip::HELD) || at <= grip_after_) {
+        return;
+    }
+    grip_after_ = at;
+
+    const double shut = limits_.min_pos[reach::JAW];
+    const bool   held = mm > shut + p_.jaw_held_mm;
+
+    if (grip_ == Grip::HELD) {
+        if (!held) {
+            grip_ = Grip::EMPTY;
+            LOG_WARN("[task] grip: LOST, the jaw closed to %.2f mm after holding", mm);
+        }
+        return;
+    }
+
+    if (still_at_.isZero() || std::fabs(mm - still_mm_) > p_.jaw_still_mm) {
+        still_mm_ = mm;
+        still_at_ = at;
+        return;
+    }
+    if ((at - still_at_).toSec() < p_.jaw_settle_s) {
+        return;
+    }
+
+    grip_ = held ? Grip::HELD : Grip::EMPTY;
+    if (held) {
+        LOG_INFO("[task] grip: holding, the jaw stopped at %.2f mm, %.2f mm short of closed",
+                 mm, mm - shut);
+    } else {
+        LOG_WARN("[task] grip: EMPTY, the jaw closed to %.2f mm with nothing between the blades",
+                 mm);
+    }
 }
 
 bool Node::goStandoff(std::string &why) {
     if (!planned_) {
         why = "nothing planned; call task/plan first";
+        return false;
+    }
+    if (!sameWorld(why)) {
         return false;
     }
     if (!jaw(false, why)) {
@@ -284,6 +410,9 @@ bool Node::goGrasp(std::string &why) {
         why = "nothing planned; call task/plan first";
         return false;
     }
+    if (!sameWorld(why)) {
+        return false;
+    }
     // Straight in, so the jaws travel down the approach instead of swinging
     // through the handle on an arc, and on the branch and roll the gate solved.
     enter(Step::ADVANCING);
@@ -300,6 +429,11 @@ void Node::tick() {
     Msg_UInt8 msg;
     msg.data = static_cast<uint8_t>(step_);
     PUBLISH_ROS(pub_step_, msg);
+
+    watchGrip();
+    Msg_UInt8 grip;
+    grip.data = static_cast<uint8_t>(grip_);
+    PUBLISH_ROS(pub_grip_, grip);
 
     const bool running = step_ == Step::TO_STANDOFF || step_ == Step::ADVANCING;
 
@@ -489,6 +623,98 @@ bool Node::onStop(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
     res.success = true;
     res.message = "stopped";
     LOG_WARN("[task] stopped; the plan is dropped");
+    return true;
+}
+
+bool Node::sameWorld(std::string &why) {
+    uint64_t theirs = 0;
+    bool     seen   = false;
+    {
+        std::lock_guard<std::mutex> lock(state_mtx_);
+        theirs = ctrl_field_;
+        seen   = ctrl_field_seen_;
+    }
+    const uint64_t mine = field_.ok() ? field_.digest() : 0;
+    if (!seen) {
+        why = "n_ctrl has not said which field it checks against on ctrl/field";
+        return false;
+    }
+    if (theirs != mine) {
+        char buf[200];
+        std::snprintf(buf, sizeof(buf),
+                      "n_ctrl checks field %016llx but this plan was made against %016llx; "
+                      "plan again",
+                      static_cast<unsigned long long>(theirs), static_cast<unsigned long long>(mine));
+        why = buf;
+        return false;
+    }
+    return true;
+}
+
+bool Node::onPlanLive(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+
+    res.success = false;
+    if (step_ != Step::IDLE && step_ != Step::FAILED) {
+        res.message = std::string("the arm is ") + name(step_) + "; task/home first";
+        return true;
+    }
+
+    std::string frame;
+    {
+        std::lock_guard<std::mutex> lock(state_mtx_);
+        frame = frame_;
+    }
+    if (frame.empty()) {
+        res.message = "nothing on live/frame yet; is n_live running?";
+        return true;
+    }
+    const std::string id   = frame.substr(frame.find_last_of('/') + 1);
+    const std::string path = frame + "/field.bin";
+
+    std::vector<float> data;
+    if (!readFloats(frame + "/candidates.txt", data, res.message)) {
+        return true;
+    }
+    if (data.empty()) {
+        res.message = id + ": n_live found no candidates within reach in this frame; nothing was loaded";
+        return true;
+    }
+
+    check::Field                 field;
+    std::unique_ptr<check::Body> body;
+    if (!openField(path, field, body)) {
+        res.message = id + ": the field is not usable; the task log says why";
+        return true;
+    }
+
+    Srv_SetString srv;
+    srv.request.data = path;
+    if (!CALL_SRV_ROS(cli_load_field_, srv)) {
+        res.message = "ctrl/load_field did not answer";
+        return true;
+    }
+    if (!srv.response.success) {
+        res.message = id + ": n_ctrl kept its field, because a move is running or the way home "
+                           "is still recorded (task/home first); its log says which";
+        return true;
+    }
+
+    std::swap(field_, field);
+    body_.swap(body);
+    planned_ = false;
+    last_    = Choice();
+    candidates_.clear();
+    publishChosen();
+
+    std::string why;
+    res.success = plan(data, why);
+    res.message = id + ": " + why;
+    if (res.success) {
+        LOG_INFO("[task] plan_live: %s", res.message.c_str());
+    } else {
+        LOG_WARN("[task] plan_live: %s", res.message.c_str());
+    }
     return true;
 }
 

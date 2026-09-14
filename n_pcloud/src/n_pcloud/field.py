@@ -21,6 +21,8 @@ CAPSULES = (
     ("palm", 0.020),
 )
 
+REACH = ((-0.43, -0.43, -0.36), (0.43, 0.43, 0.46))
+
 
 def blade_pitch(res):
     return 0.5 * res
@@ -33,6 +35,10 @@ def jaw_radius(res, pitch=None):
 
 def links_for(res):
     return CAPSULES + (("jaw", jaw_radius(res)),)
+
+
+def reach_pad(res):
+    return int(math.ceil(max(r for _n, r in links_for(res)) / res)) + 1
 
 
 def build(label, lo, res, step):
@@ -55,6 +61,38 @@ def build(label, lo, res, step):
     return {"packed": packed, "lo": np.asarray(lo, dtype=float), "res": res,
             "step": step, "links": links,
             "exempt_voxels": int(np.count_nonzero(exempt))}
+
+
+def _cells(first, last):
+    return tuple(slice(int(i), int(j)) for i, j in zip(first, last))
+
+
+def _window(lo, dims, res, box, pad):
+    first = np.floor((np.asarray(box[0], dtype=float) - lo) / res).astype(np.int64) - pad
+    last = np.ceil((np.asarray(box[1], dtype=float) - lo) / res).astype(np.int64) + pad
+    return np.clip(first, 0, dims), np.clip(last, 0, dims)
+
+
+def build_within(label, lo, res, step, box):
+    dims = np.asarray(label.shape, dtype=np.int64)
+    first, last = _window(lo, dims, res, box, 0)
+    if np.any(last <= first):
+        return None
+    grow_first, grow_last = _window(lo, dims, res, box, reach_pad(res))
+    built = build(label[_cells(grow_first, grow_last)], lo + grow_first * res, res, step)
+    built["packed"] = built["packed"][_cells(first - grow_first, last - grow_first)]
+    built["lo"] = lo + first * res
+    return built
+
+
+def box_in_camera(box, at):
+    from n_pcloud.frame import CAM_TO_ARM
+
+    lo = np.asarray(box[0], dtype=float)
+    hi = np.asarray(box[1], dtype=float)
+    unit = np.array([[i, j, k] for i in (0, 1) for j in (0, 1) for k in (0, 1)], dtype=float)
+    corners = (lo + unit * (hi - lo) - np.asarray(at, dtype=float)).dot(CAM_TO_ARM)
+    return corners.min(0), corners.max(0)
 
 
 def _to_arm(packed, lo, res):
@@ -80,7 +118,7 @@ def tilted(rpy):
     return rpy is not None and np.any(np.asarray(rpy, dtype=float) != 0.0)
 
 
-def place(label, lo, res, at, rpy):
+def place(label, lo, res, at, rpy, box=None):
     from n_pcloud.frame import cam_to_arm
 
     R = cam_to_arm(rpy)
@@ -92,32 +130,42 @@ def place(label, lo, res, at, rpy):
     arm_lo = corners.min(0)
     arm_dims = np.maximum(np.ceil((corners.max(0) - arm_lo) / res - 1e-6).astype(np.int64), 1)
 
-    out = np.full(tuple(arm_dims), occ.UNKNOWN, dtype=np.uint8)
-    jj, kk = np.meshgrid(np.arange(arm_dims[1]), np.arange(arm_dims[2]), indexing="ij")
+    first, last = np.zeros(3, dtype=np.int64), arm_dims
+    if box is not None:
+        grow_first, grow_last = _window(arm_lo, arm_dims, res, box, reach_pad(res))
+        if np.all(grow_last > grow_first):
+            first, last = grow_first, grow_last
+    size = last - first
+
+    out = np.full(tuple(size), occ.UNKNOWN, dtype=np.uint8)
+    jj, kk = np.meshgrid(np.arange(first[1], last[1]), np.arange(first[2], last[2]),
+                         indexing="ij")
     centre = np.empty(jj.shape + (3,))
     centre[..., 1] = arm_lo[1] + (jj + 0.5) * res
     centre[..., 2] = arm_lo[2] + (kk + 0.5) * res
 
-    for i in range(arm_dims[0]):
+    for n, i in enumerate(range(first[0], last[0])):
         centre[..., 0] = arm_lo[0] + (i + 0.5) * res
         idx = np.floor(((centre - at).dot(R) - lo) / res).astype(np.int64)
         inside = np.all((idx >= 0) & (idx < dims), axis=-1)
         hit = idx[inside]
-        out[i][inside] = label[hit[:, 0], hit[:, 1], hit[:, 2]]
+        out[n][inside] = label[hit[:, 0], hit[:, 1], hit[:, 2]]
 
     sub = (np.arange(6) + 0.5) / 6.0
     offsets = np.array([[a, b, c] for a in sub for b in sub for c in sub])
     for value in (occ.TARGET, occ.OBSTACLE):
         src = np.argwhere(label == value)
+        mid = ((lo + (src + 0.5) * res).dot(R.T) + at - arm_lo) / res - first
+        src = src[np.all((mid >= -1.0) & (mid < size + 1.0), axis=1)]
         for off in offsets:
             idx = np.floor(((lo + (src + off) * res).dot(R.T) + at - arm_lo) / res).astype(np.int64)
-            idx = idx[np.all((idx >= 0) & (idx < arm_dims), axis=1)]
+            idx = idx[np.all((idx >= first) & (idx < last), axis=1)] - first
             cell = (idx[:, 0], idx[:, 1], idx[:, 2])
             if value == occ.TARGET:
                 out[cell] = np.where(out[cell] == occ.OBSTACLE, occ.OBSTACLE, occ.TARGET)
             else:
                 out[cell] = occ.OBSTACLE
-    return out, arm_lo
+    return out, arm_lo + first * res
 
 
 def export(path, field, at, stamp, rpy=None):

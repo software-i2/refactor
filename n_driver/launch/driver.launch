@@ -11,7 +11,9 @@
         <param name="port" type="str" value="$(arg port)"/>
     </node>
 
-    <include if="$(arg viz)" file="$(find n_driver)/launch/viz.launch"/>
+    <include if="$(arg viz)" file="$(find n_driver)/launch/viz.launch">
+        <arg name="config" value="$(arg config)"/>
+    </include>
     <include if="$(arg foxglove)" file="$(find n_driver)/launch/foxglove.launch">
         <arg name="port" value="$(arg foxglove_port)"/>
     </include>

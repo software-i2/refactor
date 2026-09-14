@@ -1,8 +1,10 @@
 <?xml version="1.0"?>
 <launch>
+    <arg name="config" default="$(find n_conf)/config/arm.yaml"/>
+
     <!-- meshes come from n_desc, as file:// absolute paths -->
     <param name="robot_description"
-           command="$(find xacro)/xacro $(find n_driver)/urdf/arm.urdf.xacro"/>
+           command="$(find xacro)/xacro $(find n_driver)/urdf/arm.urdf.xacro config:=$(arg config)"/>
 
     <node name="robot_state_publisher" pkg="robot_state_publisher"
           type="robot_state_publisher"/>

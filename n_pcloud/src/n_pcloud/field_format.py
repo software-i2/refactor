@@ -15,7 +15,7 @@ MAGIC = b"BXFIELD4"
 _HEADER_BYTES = 8 + 24 + 24 + 12 + 4 + 8 + 24 + 24
 
 
-def digest(ply_path, json_path, res, delta, xyz, links, filt=(), rpy=None):
+def digest(ply_path, json_path, res, delta, xyz, links, filt=(), rpy=None, box=None):
     """Stable input fingerprint for a scene field."""
     h = hashlib.sha256()
     for path in (ply_path, json_path):
@@ -30,6 +30,8 @@ def digest(ply_path, json_path, res, delta, xyz, links, filt=(), rpy=None):
         h.update(np.float64(radius).tobytes())
     if rpy is not None and np.any(np.asarray(rpy, dtype=float) != 0.0):
         h.update(np.asarray(rpy, dtype="<f8").tobytes())
+    if box is not None:
+        h.update(np.asarray(box, dtype="<f8").tobytes())
     return int(np.frombuffer(h.digest()[:8], dtype="<u8")[0])
 
 

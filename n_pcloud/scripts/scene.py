@@ -14,9 +14,8 @@ import time
 
 import numpy as np
 
-from n_pcloud import features, field, frame
-from n_pcloud import occupancy as occ
-from n_pcloud.field_format import digest, read_header
+from n_pcloud import field, frame, pipeline
+from n_pcloud.field_format import read_header
 
 
 def triple(flag, shape):
@@ -62,6 +61,8 @@ def main():
                     help="screen out candidates below this; n_check owns the verdict")
     ap.add_argument("--raw", action="store_true",
                     help="skip all noise filtering, for comparison")
+    ap.add_argument("--full", action="store_true",
+                    help="keep the whole camera volume instead of cropping to the arm's reach")
     ap.add_argument("--out", help="write the field here")
     ap.add_argument("--candidates", help="write the flat candidate list here, one per line")
     ap.add_argument("--check", help="report whether this field still matches these inputs")
@@ -69,13 +70,11 @@ def main():
 
     ply_path, json_path = scene_paths(args)
     name = args.scene or os.path.basename(ply_path)
-    links = field.links_for(args.res)
-    filt = () if args.raw else (occ.SUPPORT_TOL, occ.SUPPORT_MIN,
-                                occ.SUPPORT_WINDOW, occ.CARVE_MIN_HITS,
-                                occ.HANDLE_RADIUS)
-    stamp = digest(ply_path, json_path, args.res, args.step, args.at, links, filt, args.rpy)
+    box = None if args.full else field.REACH
 
     if args.check:
+        stamp = pipeline.stamp(ply_path, json_path, args.at, args.rpy, args.res, args.step,
+                               args.raw, box)
         head = read_header(args.check)
         print("%s" % args.check)
         print("  built from  %016x" % head["digest"])
@@ -90,63 +89,62 @@ def main():
         return 3
 
     t0 = time.time()
+    clock = pipeline.Clock()
+    stamp = pipeline.stamp(ply_path, json_path, args.at, args.rpy, args.res, args.step,
+                           args.raw, box)
+    clock.lap("digest")
     f = frame.read(name, ply_path, json_path, args.at, args.rpy)
+    clock.lap("read")
+    r = pipeline.run(f, stamp, args.res, args.step, args.reach_max, args.floor_z, args.raw,
+                     box, clock)
+    pipeline.save(r, args.out, args.candidates)
+
     print("%s" % name)
     print("  %s" % ply_path)
     print("  %s" % json_path)
     print("  %d points, %d poses, camera at %s rpy %s in arm_base"
           % (len(f.points), len(f.pos), np.round(f.at, 3), np.round(f.rpy, 2)))
 
-    keep_mask, handle_mask, hit_threshold = None, None, 1
     if not args.raw:
-        handle_mask = occ.near_grasps(f.points, f.pos, res=args.res)
-        keep_mask = ~occ.flying_pixels(f.points) | handle_mask
-        hit_threshold = occ.CARVE_MIN_HITS
-        dropped = len(f.points) - int(keep_mask.sum())
         print("  filter dropped %d of %d returns (%.2f%%), %d spared as handle"
-              % (dropped, len(f.points), 100.0 * dropped / len(f.points),
-                 int(handle_mask.sum())))
+              % (r["dropped"], len(f.points), 100.0 * r["dropped"] / len(f.points),
+                 r["spared"]))
 
-    label, lo = occ.classify(f.points, res=args.res, keep=keep_mask,
-                             trusted=handle_mask, hit_threshold=hit_threshold)
-    label, carved = occ.carve_target(label, lo, args.res, f.pos)
-    counts = dict((occ.NAME[v], int((label == v).sum())) for v in occ.NAME)
+    counts = r["counts"]
     print("  grid %s at %.0f mm: %s"
-          % (tuple(label.shape), args.res * 1000,
+          % (r["grid"], args.res * 1000,
              ", ".join("%s %d" % (k, counts[k]) for k in ("free", "obstacle", "target", "unknown"))))
-    if carved == 0:
+    if r["carved"] == 0:
         print("  WARNING: no handle voxels carved. The poses do not land on anything the")
         print("  camera saw, which usually means --at is wrong for this capture.")
 
-    if field.tilted(args.rpy):
-        label, lo = field.place(label, lo, args.res, args.at, args.rpy)
+    if r["placed"] is not None:
         print("  resampled into arm_base for rpy %s: grid %s" % (np.round(args.rpy, 2),
-                                                               tuple(label.shape)))
+                                                               r["placed"]))
+    if r["cropped"] is not None:
+        print("  cropped to the arm's reach: grid %s" % (r["cropped"],))
 
-    built = field.build(label, lo, args.res, args.step)
+    built = r["field"]
+    links = built["links"]
     print("  blades sampled every %.1f mm, jaw dilated %.1f mm, arm %.1f mm"
           % (field.blade_pitch(args.res) * 1000, links[-1][1] * 1000, links[0][1] * 1000))
 
-    cand = features.candidates(f)
-    keep = features.in_reach(cand, reach_max=args.reach_max, floor_z=args.floor_z)
+    keep = r["keep"]
     print("  %d of %d candidates are within reach and above the floor"
-          % (int(keep.sum()), len(cand)))
+          % (int(keep.sum()), len(r["cand"])))
 
     if args.out:
-        size, arm_lo, dims = field.export(args.out, built, args.at, stamp, args.rpy)
-        hi = arm_lo + dims * built["res"]
-        print("  wrote %s (%.1f MB), digest %016x" % (args.out, size / 1e6, stamp))
+        hi = r["arm_lo"] + r["dims"] * built["res"]
+        print("  wrote %s (%.1f MB), digest %016x" % (args.out, r["size"] / 1e6, r["stamp"]))
         print("    arm_base x %.3f..%.3f  y %.3f..%.3f  z %.3f..%.3f"
-              % (arm_lo[0], hi[0], arm_lo[1], hi[1], arm_lo[2], hi[2]))
+              % (r["arm_lo"][0], hi[0], r["arm_lo"][1], hi[1], r["arm_lo"][2], hi[2]))
 
     if args.candidates:
-        flat = features.flatten(cand[keep])
-        with open(args.candidates, "w") as fh:
-            fh.write("[%s]\n" % ", ".join("%.6f" % v for v in flat))
         print("  wrote %s (%d candidates, %d floats)"
-              % (args.candidates, int(keep.sum()), len(flat)))
+              % (args.candidates, int(keep.sum()), r["floats"]))
         print("    rosservice call /task/plan \"data: $(cat %s)\"" % args.candidates)
 
+    print("  %s" % "  ".join("%s %.2f" % t for t in r["times"]))
     print("  %.2f s" % (time.time() - t0))
     return 0
 

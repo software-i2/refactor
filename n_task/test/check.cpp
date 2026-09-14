@@ -73,8 +73,8 @@ int main(int argc, char **argv) {
     expect(!readCandidates({1, 2, 3, 4, 5}, cs, why), "a ragged array is refused");
     std::printf("  -> %s\n", why.c_str());
 
-    expect(!readCandidates({0, 0, 0, 0, 1, 0}, cs, why), "a single candidate is refused");
-    std::printf("  -> %s\n", why.c_str());
+    expect(readCandidates({0, 0, 0, 0, 1, 0}, cs, why) && cs.size() == 1,
+           "a single candidate is accepted");
 
     // 18 floats is 3 candidates of 6 and 2 of 9. It reads as 9, and says so.
     expect(readCandidates(arc(3, 0.04f, false), cs, why) && cs.size() == 2,

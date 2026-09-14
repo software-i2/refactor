@@ -19,7 +19,7 @@ struct Candidate {
 };
 
 // 6 floats per candidate (point, axis) or 9 (point, axis, approach), at least
-// two. `why` is set on failure, and on success when the count is ambiguous --
+// one. `why` is set on failure, and on success when the count is ambiguous --
 // 18 floats is both 3 of 6 and 2 of 9, and guessing silently grasps thin air.
 bool readCandidates(const std::vector<float> &data,
                     std::vector<Candidate> &out,

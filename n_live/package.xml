@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>n_live</name>
+  <version>0.0.0</version>
+  <description>Obstacle fields and grasp candidates built online, as captures arrive.</description>
+  <maintainer email="bolin@todo.todo">nknight</maintainer>
+  <license>TODO</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>n_conf</exec_depend>
+  <exec_depend>n_pcloud</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+</package>

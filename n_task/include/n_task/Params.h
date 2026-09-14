@@ -17,11 +17,18 @@ struct Params {
     bool auto_sequence = false;
     double ctrl_silence_s = kine::NONE;
 
+    double jaw_held_mm  = kine::NONE;
+    double jaw_still_mm = kine::NONE;
+    double jaw_settle_s = kine::NONE;
+
     void load(conf::Doc &doc) {
         ask.load(doc);
         rate_hz        = doc.num("task.rate_hz");
         auto_sequence  = doc.flag("task.auto_sequence");
         ctrl_silence_s = doc.num("task.ctrl_silence_s");
+        jaw_held_mm    = doc.num("task.jaw_held_mm");
+        jaw_still_mm   = doc.num("task.jaw_still_mm");
+        jaw_settle_s   = doc.num("task.jaw_settle_s");
     }
 
     const char *missing() const {
@@ -32,7 +39,16 @@ struct Params {
         if (!std::isfinite(rate_hz)) {
             return "task.rate_hz";
         }
-        return std::isfinite(ctrl_silence_s) ? NULL : "task.ctrl_silence_s";
+        if (!std::isfinite(ctrl_silence_s)) {
+            return "task.ctrl_silence_s";
+        }
+        if (!std::isfinite(jaw_held_mm) || jaw_held_mm <= 0.0) {
+            return "task.jaw_held_mm";
+        }
+        if (!std::isfinite(jaw_still_mm) || jaw_still_mm <= 0.0) {
+            return "task.jaw_still_mm";
+        }
+        return std::isfinite(jaw_settle_s) && jaw_settle_s > 0.0 ? NULL : "task.jaw_settle_s";
     }
 };
 

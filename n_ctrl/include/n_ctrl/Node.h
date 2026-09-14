@@ -44,6 +44,7 @@ private:
     bool onStop(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
     bool onReturn(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
     bool onRest(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
+    bool onLoadField(Srv_SetString_Request &req, Srv_SetString_Response &res);
 
     bool handle(Srv_SetFloat32Array_Request &req,
                 Srv_SetFloat32Array_Response &res,
@@ -65,6 +66,7 @@ private:
     DECLARE_ROS_PUBLISHER(pub_state_, Msg_UInt8)
     DECLARE_ROS_PUBLISHER(pub_pose_, Msg_PoseArray)
     DECLARE_ROS_PUBLISHER(pub_body_, Msg_MarkerArray)
+    DECLARE_ROS_PUBLISHER(pub_field_, Msg_UInt64)
     DECLARE_ROS_SERVICE_SERVER(srv_move_j_, Srv_SetFloat32Array)
     DECLARE_ROS_SERVICE_SERVER(srv_move_l_, Srv_SetFloat32Array)
     DECLARE_ROS_SERVICE_SERVER(srv_move_j_rel_, Srv_SetFloat32Array)
@@ -74,8 +76,11 @@ private:
     DECLARE_ROS_SERVICE_SERVER(srv_stop_, Srv_Trigger)
     DECLARE_ROS_SERVICE_SERVER(srv_return_, Srv_Trigger)
     DECLARE_ROS_SERVICE_SERVER(srv_rest_, Srv_Trigger)
+    DECLARE_ROS_SERVICE_SERVER(srv_load_field_, Srv_SetString)
 
     void loadField(const std::string &path);
+    bool openField(const std::string &path, check::Field &field,
+                   std::unique_ptr<check::Body> &body);
 
     Params        p_;
     kine::Geom    g_;
