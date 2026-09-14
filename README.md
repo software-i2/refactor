@@ -33,7 +33,7 @@ roslaunch tools/sim.launch scene:=000XXX
 
 
 ```bash
-tools/classify/run.py 000XXX
+tools/classify/run.py 000XXX --candidates
 ```
 
 ```bash
