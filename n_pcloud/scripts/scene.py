@@ -15,6 +15,7 @@ import time
 import numpy as np
 
 from n_pcloud import field, frame, pipeline
+from n_pcloud import occupancy as occ
 from n_pcloud.field_format import read_header
 
 
@@ -53,7 +54,7 @@ def main():
                     metavar='"R P Y"',
                     help="extra camera rotation about arm_base x, y, z, degrees, applied "
                          "after the fixed optical-to-arm swap and pivoting on --at")
-    ap.add_argument("--res", type=float, default=0.005, help="working voxel size")
+    ap.add_argument("--res", type=float, default=0.0025, help="working voxel size")
     ap.add_argument("--step", type=float, default=0.002, help="axis sample spacing n_check walks")
     ap.add_argument("--reach-max", type=float, default=0.35, dest="reach_max",
                     help="generous screen on how far the arm can get; n_check owns the verdict")
@@ -114,6 +115,8 @@ def main():
     print("  grid %s at %.0f mm: %s"
           % (r["grid"], args.res * 1000,
              ", ".join("%s %d" % (k, counts[k]) for k in ("free", "obstacle", "target", "unknown"))))
+    print("  %d handle voxels carved, %d more cleared in the %.0f mm approach corridors"
+          % (r["carved"], r["corridor"], occ.CORRIDOR_LENGTH * 1000))
     if r["carved"] == 0:
         print("  WARNING: no handle voxels carved. The poses do not land on anything the")
         print("  camera saw, which usually means --at is wrong for this capture.")

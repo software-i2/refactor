@@ -26,7 +26,8 @@ class Clock(object):
 def stamp(ply_path, json_path, at, rpy, res, step, raw=False, box=None):
     filt = () if raw else (occ.SUPPORT_TOL, occ.SUPPORT_MIN,
                            occ.SUPPORT_WINDOW, occ.CARVE_MIN_HITS,
-                           occ.HANDLE_RADIUS, occ.BAR_GAP)
+                           occ.HANDLE_RADIUS, occ.BAR_GAP,
+                           occ.CORRIDOR_LENGTH, occ.CORRIDOR_RADIUS)
     return digest(ply_path, json_path, res, step, at, field.links_for(res), filt, rpy, box)
 
 
@@ -49,6 +50,8 @@ def run(f, stamp, res, step, reach_max, floor_z, raw=False, box=None, clock=None
     clock.lap("classify")
 
     label, out["carved"] = occ.carve_target(label, lo, res, f.pos)
+    label, out["corridor"] = occ.carve_corridor(label, lo, res, f.pos,
+                                                f.rot[:, :, features.APPROACH])
     out["grid"] = tuple(label.shape)
     out["counts"] = dict((occ.NAME[v], int((label == v).sum())) for v in occ.NAME)
     out["label"], out["lo"] = label, lo

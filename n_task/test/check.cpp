@@ -2,7 +2,7 @@
 //
 // Plain g++, no ROS:
 //   g++ -std=c++17 -Iinclude -I../n_kine/include -I../n_check/include -I../n_conf/include
-//       test/check.cpp src/Pick.cpp ../n_kine/src/*.cpp ../n_check/src/*.cpp
+//       test/check.cpp src/Pick.cpp src/FSM.cpp ../n_kine/src/*.cpp ../n_check/src/*.cpp
 //       ../n_conf/src/Doc.cpp -lyaml-cpp -o /tmp/check
 //
 // argv[1] is the config; it defaults to ../n_conf/config/arm.yaml.
@@ -12,6 +12,7 @@
 #include <n_kine/Fk.h>
 #include <n_task/Params.h>
 #include <n_task/Pick.h>
+#include <n_task/FSM.h>
 
 #include <cmath>
 #include <cstdio>
@@ -267,6 +268,111 @@ int main(int argc, char **argv) {
             }
             expect(drives, "the advance drives from every corner of the arrival tolerance");
         }
+    }
+
+    {
+        std::printf("\n  -- the step machine --\n");
+        bool named = std::string(name(Step::E_STOP)) == "E_STOP";
+        for (int i = 0; i <= static_cast<int>(Step::E_STOP); ++i) {
+            for (int j = 0; j < i; ++j) {
+                named = named
+                        && std::string(name(static_cast<Step>(i)))
+                                   != name(static_cast<Step>(j));
+            }
+        }
+        expect(named, "every step publishes its own name on task/step");
+        expect(accepts(Step::IDLE, Command::PLAN, why) && !accepts(Step::IDLE, Command::START, why),
+               "a pick starts only from a plan");
+        expect(!accepts(Step::MOVE_TO_STANDOFF, Command::PLAN, why),
+               "no planning while a leg runs");
+        std::printf("  -> %s\n", why.c_str());
+        expect(!accepts(Step::HOLDING, Command::START, why),
+               "start while holding is refused, so the load is not dropped");
+        expect(!accepts(Step::CHECK_GRASP, Command::HOME, why)
+                       && accepts(Step::HOLDING, Command::HOME, why),
+               "home waits for the grip verdict");
+        expect(!accepts(Step::AT_STANDOFF, Command::CLOSE, why)
+                       && accepts(Step::AT_HANDLE, Command::CLOSE, why),
+               "the jaw closes at the handle, not the standoff");
+        expect(accepts(Step::MOVE_TO_HANDLE, Command::STOP, why)
+                       && afterCommand(Step::MOVE_TO_HANDLE, Command::STOP) == Step::E_STOP,
+               "stop is always taken and lands in E_STOP");
+        expect(afterCommand(Step::HOLDING, Command::OPEN) == Step::AT_HANDLE
+                       && afterCommand(Step::IDLE, Command::CLOSE) == Step::IDLE,
+               "a jaw command moves the step only mid-pick");
+        expect(afterPlan(Step::IDLE, true) == Step::CHOSEN
+                       && afterPlan(Step::CHOSEN, false) == Step::IDLE
+                       && afterPlan(Step::FAILED, false) == Step::FAILED,
+               "a failed plan drops an old one and leaves a failure standing");
+
+        Sense in;
+        in.ctrl_seen = true;
+        in.now_s     = 100.0;
+        in.entered_s = 100.0;
+        in.ctrl_at_s = 100.0;
+
+        in.jaw_fresh = true;
+        in.jaw_mm    = p.jaw_open_mm;
+        Next n       = next(Step::OPEN_JAW, in, p);
+        expect(n.step == Step::MOVE_TO_STANDOFF && n.action == Action::MOVE_TO_STANDOFF,
+               "an open jaw sends the arm to the standoff");
+        in.jaw_mm = 1.3;
+        in.now_s  = 100.0 + p.jaw_timeout_s + 0.1;
+        n         = next(Step::OPEN_JAW, in, p);
+        expect(n.step == Step::FAILED, "a jaw that never opens fails the pick");
+        std::printf("  -> %s\n", n.why.c_str());
+
+        in.now_s     = 100.0;
+        in.ctrl_busy = true;
+        in.ctrl      = ctrl::State::APPROACHING;
+        expect(next(Step::MOVE_TO_STANDOFF, in, p).step == Step::MOVE_TO_STANDOFF,
+               "a running leg is left alone");
+        in.ctrl = ctrl::State::REACHED;
+        expect(next(Step::MOVE_TO_STANDOFF, in, p).step == Step::AT_STANDOFF,
+               "arriving parks at the standoff");
+        in.auto_sequence = true;
+        n                = next(Step::AT_STANDOFF, in, p);
+        expect(n.step == Step::MOVE_TO_HANDLE && n.action == Action::MOVE_TO_HANDLE,
+               "auto_sequence moves on from the standoff");
+        in.auto_sequence = false;
+        expect(next(Step::AT_STANDOFF, in, p).action == Action::NONE,
+               "without it the arm waits there");
+
+        in.ctrl = ctrl::State::PILLOW;
+        n       = next(Step::MOVE_TO_HANDLE, in, p);
+        expect(n.step == Step::FAILED, "a pillow mid-leg fails the pick");
+        std::printf("  -> %s\n", n.why.c_str());
+
+        in.ctrl_busy = false;
+        in.ctrl      = ctrl::State::REACHED;
+        in.now_s     = 100.0 + p.ctrl_silence_s + 0.1;
+        in.ctrl_at_s = in.now_s;
+        expect(next(Step::MOVE_TO_BASE, in, p).step == Step::FAILED,
+               "a leg n_ctrl never takes fails, though it still reports the last arrival");
+
+        in.now_s     = 100.0;
+        in.ctrl_at_s = 100.0;
+        in.ctrl_busy = true;
+        in.carrying  = true;
+        expect(next(Step::MOVE_TO_BASE, in, p).step == Step::SUCCESS,
+               "home after the grasp is a success");
+        in.carrying = false;
+        expect(next(Step::MOVE_TO_BASE, in, p).step == Step::IDLE,
+               "home from anywhere else is idle");
+
+        in.grip      = Grip::CLOSING;
+        in.jaw_still = false;
+        expect(next(Step::CLOSE_JAW, in, p).step == Step::CLOSE_JAW, "a moving jaw is still closing");
+        in.jaw_still = true;
+        expect(next(Step::CLOSE_JAW, in, p).step == Step::CHECK_GRASP, "a jaw that stops is checked");
+        in.grip = Grip::EMPTY;
+        expect(next(Step::CHECK_GRASP, in, p).step == Step::HOLDING,
+               "an empty verdict is recorded, not gated");
+        in.grip  = Grip::CLOSING;
+        in.now_s = 100.0 + p.jaw_timeout_s + 0.1;
+        n        = next(Step::CHECK_GRASP, in, p);
+        expect(n.step == Step::HOLDING && !n.why.empty(), "no verdict in time holds anyway, and says so");
+        std::printf("  -> %s\n", n.why.c_str());
     }
 
     std::printf("\n%s\n", failures == 0 ? "ALL OK" : "SOME CHECKS FAILED");

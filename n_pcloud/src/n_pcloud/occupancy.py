@@ -22,6 +22,8 @@ CARVE_MIN_HITS = 2
 HANDLE_RADIUS = 0.005
 BAR_GAP = 0.015
 PAD = 0.02
+CORRIDOR_LENGTH = 0.04
+CORRIDOR_RADIUS = 0.02
 
 
 def _axis_lattice(a, min_gap=1e-5):
@@ -101,7 +103,7 @@ def flying_pixels(xyz, tol=SUPPORT_TOL, need=SUPPORT_MIN, window=SUPPORT_WINDOW)
     return drop
 
 
-def near_grasps(xyz, grasps, res=0.005, pad=PAD, radius=HANDLE_RADIUS):
+def near_grasps(xyz, grasps, res=0.0025, pad=PAD, radius=HANDLE_RADIUS):
     grasps = np.asarray(grasps, dtype=float)
     out = np.zeros(len(xyz), dtype=bool)
     if not len(grasps):
@@ -137,7 +139,7 @@ def sphere_offsets(radius, res):
     return np.stack([dx[keep], dy[keep], dz[keep]], axis=1)
 
 
-def classify(xyz, res=0.005, pad=PAD, tol=None, chunk=32, keep=None,
+def classify(xyz, res=0.0025, pad=PAD, tol=None, chunk=32, keep=None,
              trusted=None, hit_threshold=CARVE_MIN_HITS):
     intr = _intrinsics(xyz)
     img = _depth_image(xyz, intr)
@@ -200,21 +202,27 @@ def _grasp_voxels(grasps, lo, res, dims, radius, gap=BAR_GAP):
 
     ends = np.asarray(grasps, dtype=float)
     for a, b in zip(ends[:-1], ends[1:]):
-        ab = b - a
-        length = np.linalg.norm(ab)
+        length = np.linalg.norm(b - a)
         if length <= 0.0 or length > gap:
             continue
-        first = np.clip(np.floor((np.minimum(a, b) - radius - lo) / res).astype(np.int64), 0, dims)
-        last = np.clip(np.floor((np.maximum(a, b) + radius - lo) / res).astype(np.int64) + 1, 0, dims)
-        if np.any(last <= first):
-            continue
-        axes = np.meshgrid(*[np.arange(first[k], last[k]) for k in range(3)], indexing="ij")
-        cells = np.stack(axes, axis=-1).reshape(-1, 3)
-        centre = lo + (cells + 0.5) * res
-        t = np.clip((centre - a).dot(ab) / (length * length), 0.0, 1.0)
-        close = cells[np.linalg.norm(centre - a - np.outer(t, ab), axis=1) <= radius]
-        near[close[:, 0], close[:, 1], close[:, 2]] = True
+        _capsule(near, a, b, lo, res, radius)
     return near
+
+
+def _capsule(near, a, b, lo, res, radius):
+    dims = np.array(near.shape)
+    ab = b - a
+    length = np.linalg.norm(ab)
+    first = np.clip(np.floor((np.minimum(a, b) - radius - lo) / res).astype(np.int64), 0, dims)
+    last = np.clip(np.floor((np.maximum(a, b) + radius - lo) / res).astype(np.int64) + 1, 0, dims)
+    if np.any(last <= first):
+        return
+    axes = np.meshgrid(*[np.arange(first[k], last[k]) for k in range(3)], indexing="ij")
+    cells = np.stack(axes, axis=-1).reshape(-1, 3)
+    centre = lo + (cells + 0.5) * res
+    t = np.clip((centre - a).dot(ab) / max(length * length, 1e-18), 0.0, 1.0)
+    close = cells[np.linalg.norm(centre - a - np.outer(t, ab), axis=1) <= radius]
+    near[close[:, 0], close[:, 1], close[:, 2]] = True
 
 
 def carve_target(state, lo, res, grasps, radius=HANDLE_RADIUS, max_radius=0.015):
@@ -230,3 +238,16 @@ def carve_target(state, lo, res, grasps, radius=HANDLE_RADIUS, max_radius=0.015)
     is_target = near & (label == OBSTACLE)
     label[is_target] = TARGET
     return label, int(is_target.sum())
+
+
+def carve_corridor(state, lo, res, grasps, approach, length=CORRIDOR_LENGTH,
+                   radius=CORRIDOR_RADIUS):
+    label = state.copy()
+    near = np.zeros(state.shape, dtype=bool)
+    for p, a in zip(np.asarray(grasps, dtype=float), np.asarray(approach, dtype=float)):
+        n = np.linalg.norm(a)
+        if n > 0.0:
+            _capsule(near, p, p - a * (length / n), lo, res, radius)
+    is_clear = near & (label == OBSTACLE)
+    label[is_clear] = TARGET
+    return label, int(is_clear.sum())

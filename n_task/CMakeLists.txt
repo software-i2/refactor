@@ -17,6 +17,7 @@ compile_my_exec(n_task_node
                 src/main.cpp
                 src/Node.cpp
                 src/Pick.cpp
+                src/FSM.cpp
                 ${N_CTRL_PATH})
 target_link_libraries(n_task_node pthread)
 
@@ -24,6 +25,7 @@ target_link_libraries(n_task_node pthread)
 compile_my_exec(n_task_check
                 test/check.cpp
                 src/Pick.cpp
+                src/FSM.cpp
                 ${N_CTRL_PATH})
 
 install_my_config_and_launch_files()

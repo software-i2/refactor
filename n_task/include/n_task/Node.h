@@ -7,6 +7,7 @@
 #include <n_ctrl/Bridge.h>
 #include <n_ctrl/Exec.h>
 #include <n_task/Params.h>
+#include <n_task/FSM.h>
 #include <n_task/Pick.h>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/String.h>
@@ -16,24 +17,6 @@
 #include <string>
 
 namespace task {
-
-enum class Step : uint8_t {
-    IDLE = 0,
-    TO_STANDOFF,
-    AT_STANDOFF,
-    ADVANCING,
-    HOLDING,
-    FAILED
-};
-
-const char *name(Step s);
-
-enum class Grip : uint8_t {
-    NONE = 0,
-    CLOSING,
-    HELD,
-    EMPTY
-};
 
 class Node {
 public:
@@ -60,17 +43,20 @@ private:
     bool onStop(Srv_Trigger_Request &req, Srv_Trigger_Response &res);
 
     bool plan(const std::vector<float> &data, std::string &why);
+    bool planStep(const std::vector<float> &data, std::string &why);
+    bool planLive(const std::string &frame, std::string &msg);
     void report();
     void publishChosen();
 
-    bool goStandoff(std::string &why);
-    bool goGrasp(std::string &why);
+    bool startPick(std::string &why);
+    bool perform(Action a, Step arm, std::string &why);
     bool sameWorld(std::string &why);
 
     bool moveToPose(const kine::Joints &goal, std::string &why);
     bool moveAlong(const kine::Vec3 &to, std::string &why);
     bool jaw(bool shut, std::string &why);
     void watchGrip();
+    Sense sense();
     void enter(Step s);
     bool snapshot(kine::Joints &q);
     void loadField(const std::string &path);
@@ -81,7 +67,7 @@ private:
     DECLARE_ROS_SUBSCRIBER(sub_ctrl_, Msg_UInt8)
     DECLARE_ROS_SUBSCRIBER(sub_frame_, std_msgs::String)
     DECLARE_ROS_SUBSCRIBER(sub_ctrl_field_, Msg_UInt64)
-    DECLARE_ROS_PUBLISHER(pub_step_, Msg_UInt8)
+    DECLARE_ROS_PUBLISHER(pub_step_, std_msgs::String)
     DECLARE_ROS_PUBLISHER(pub_chosen_, Msg_PoseArray)
     DECLARE_ROS_PUBLISHER(pub_grip_, Msg_UInt8)
 
@@ -133,11 +119,13 @@ private:
     Choice                 last_;
     std::vector<Candidate> candidates_;
 
-    Step   step_   = Step::IDLE;
-    double leg_at_ = 0.0;
+    Step   step_       = Step::IDLE;
+    double entered_at_ = 0.0;
+    bool   carrying_   = false;
 
     Grip      grip_ = Grip::NONE;
     ros::Time grip_after_;
+    ros::Time jaw_cmd_at_;
     double    still_mm_ = 0.0;
     ros::Time still_at_;
 

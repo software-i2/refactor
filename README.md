@@ -50,7 +50,7 @@ there are 2 main workflows happening:
 1. take in a ply and a json file
 2. take each pose's voxel and exempted its neighbours (5mm sphere)
 3. for the left over points, conduct flying-pixel filtering, keep pixel only if 5 of its 8 neighbour are within 4mm
-4. voxelise at 5mm, voxels are labelled free, unknown, obstacle
+4. voxelise at 10mm, voxels are labelled free, unknown, obstacle
 5. handle poses and exempted regions are labelled as target
 6. run the checks on the handle poses, remove points out of reach and below floor
 7. leftover points are stored in candidates.txt

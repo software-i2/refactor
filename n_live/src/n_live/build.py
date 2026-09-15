@@ -18,7 +18,7 @@ CANDIDATES = "candidates.txt"
 
 
 class Params(object):
-    def __init__(self, at, rpy, res=0.005, step=0.002, reach_max=0.35, floor_z=0.0, full=False):
+    def __init__(self, at, rpy, res=0.0025, step=0.002, reach_max=0.35, floor_z=0.0, full=False):
         self.at = [float(v) for v in at]
         self.rpy = [float(v) for v in rpy]
         self.res = float(res)
@@ -61,6 +61,7 @@ def build(fid, ply, js, folder, p):
         "poses": int(len(f.pos)),
         "candidates": int(r["keep"].sum()),
         "carved": int(r["carved"]),
+        "corridor": int(r["corridor"]),
         "grid": [int(d) for d in r["grid"]],
         "field_mb": round(r["size"] / 1e6, 2),
         "times": [[stage, round(t, 3)] for stage, t in r["times"]],

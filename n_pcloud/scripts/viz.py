@@ -136,6 +136,8 @@ def main():
         label, lo = occ.classify(f.points, res=head["res"], keep=keep,
                                  trusted=handle)
         label, carved = occ.carve_target(label, lo, head["res"], f.pos)
+        label, _cleared = occ.carve_corridor(label, lo, head["res"], f.pos,
+                                             f.rot[:, :, features.APPROACH])
         idx, inside = occ.world_to_index(f.points, lo, head["res"], label.shape)
         is_target = np.zeros(len(f.points), dtype=bool)
         is_target[inside] = label[tuple(idx[inside].T)] == occ.TARGET
