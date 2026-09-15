@@ -62,6 +62,8 @@ def main():
                     help="screen out candidates below this; n_check owns the verdict")
     ap.add_argument("--raw", action="store_true",
                     help="skip all noise filtering, for comparison")
+    ap.add_argument("--all-poses", action="store_true", dest="all_poses",
+                    help="keep rope poses as candidates too; by default only handles are kept")
     ap.add_argument("--full", action="store_true",
                     help="keep the whole camera volume instead of cropping to the arm's reach")
     ap.add_argument("--out", help="write the field here")
@@ -75,7 +77,7 @@ def main():
 
     if args.check:
         stamp = pipeline.stamp(ply_path, json_path, args.at, args.rpy, args.res, args.step,
-                               args.raw, box)
+                               args.raw, box, args.all_poses)
         head = read_header(args.check)
         print("%s" % args.check)
         print("  built from  %016x" % head["digest"])
@@ -92,12 +94,12 @@ def main():
     t0 = time.time()
     clock = pipeline.Clock()
     stamp = pipeline.stamp(ply_path, json_path, args.at, args.rpy, args.res, args.step,
-                           args.raw, box)
+                           args.raw, box, args.all_poses)
     clock.lap("digest")
     f = frame.read(name, ply_path, json_path, args.at, args.rpy)
     clock.lap("read")
     r = pipeline.run(f, stamp, args.res, args.step, args.reach_max, args.floor_z, args.raw,
-                     box, clock)
+                     box, clock, args.all_poses)
     pipeline.save(r, args.out, args.candidates)
 
     print("%s" % name)
@@ -117,7 +119,7 @@ def main():
              ", ".join("%s %d" % (k, counts[k]) for k in ("free", "obstacle", "target", "unknown"))))
     print("  %d handle voxels carved, %d more cleared in the %.0f mm approach corridors"
           % (r["carved"], r["corridor"], occ.CORRIDOR_LENGTH * 1000))
-    if r["carved"] == 0:
+    if r["carved"] == 0 and (r["handle"] is None or r["handle"].any()):
         print("  WARNING: no handle voxels carved. The poses do not land on anything the")
         print("  camera saw, which usually means --at is wrong for this capture.")
 
@@ -133,8 +135,11 @@ def main():
           % (field.blade_pitch(args.res) * 1000, links[-1][1] * 1000, links[0][1] * 1000))
 
     keep = r["keep"]
-    print("  %d of %d candidates are within reach and above the floor"
-          % (int(keep.sum()), len(r["cand"])))
+    if r["handle"] is not None:
+        print("  %d of %d poses look like handle (backdrop gap >= %.0f mm)"
+              % (int(r["handle"].sum()), len(r["handle"]), occ.HANDLE_GAP * 1000))
+    print("  %d of %d candidates are %swithin reach and above the floor"
+          % (int(keep.sum()), len(r["cand"]), "handles " if r["handle"] is not None else ""))
 
     if args.out:
         hi = r["arm_lo"] + r["dims"] * built["res"]

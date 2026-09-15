@@ -23,18 +23,21 @@ class Clock(object):
         self.mark = now
 
 
-def stamp(ply_path, json_path, at, rpy, res, step, raw=False, box=None):
+def stamp(ply_path, json_path, at, rpy, res, step, raw=False, box=None, all_poses=False):
     filt = () if raw else (occ.SUPPORT_TOL, occ.SUPPORT_MIN,
                            occ.SUPPORT_WINDOW, occ.CARVE_MIN_HITS,
                            occ.HANDLE_RADIUS, occ.BAR_GAP,
                            occ.CORRIDOR_LENGTH, occ.CORRIDOR_RADIUS)
+    if not all_poses:
+        filt += (occ.HANDLE_GAP, occ.HANDLE_WINDOW, occ.HANDLE_ACROSS)
     return digest(ply_path, json_path, res, step, at, field.links_for(res), filt, rpy, box)
 
 
-def run(f, stamp, res, step, reach_max, floor_z, raw=False, box=None, clock=None):
+def run(f, stamp, res, step, reach_max, floor_z, raw=False, box=None, clock=None,
+        all_poses=False):
     clock = clock or Clock()
     out = {"frame": f, "stamp": stamp, "times": clock.times,
-           "dropped": None, "spared": None, "placed": None, "cropped": None}
+           "dropped": None, "spared": None, "placed": None, "cropped": None, "handle": None}
 
     keep_mask, handle_mask, hit_threshold = None, None, 1
     if not raw:
@@ -49,9 +52,15 @@ def run(f, stamp, res, step, reach_max, floor_z, raw=False, box=None, clock=None
                              trusted=handle_mask, hit_threshold=hit_threshold)
     clock.lap("classify")
 
-    label, out["carved"] = occ.carve_target(label, lo, res, f.pos)
-    label, out["corridor"] = occ.carve_corridor(label, lo, res, f.pos,
-                                                f.rot[:, :, features.APPROACH])
+    pick = slice(None)
+    if not all_poses:
+        out["handle"] = occ.handle_poses(f.points, f.pos)
+        pick = out["handle"]
+        clock.lap("handles")
+
+    label, out["carved"] = occ.carve_target(label, lo, res, f.pos[pick])
+    label, out["corridor"] = occ.carve_corridor(label, lo, res, f.pos[pick],
+                                                f.rot[pick][:, :, features.APPROACH])
     out["grid"] = tuple(label.shape)
     out["counts"] = dict((occ.NAME[v], int((label == v).sum())) for v in occ.NAME)
     out["label"], out["lo"] = label, lo
@@ -75,6 +84,8 @@ def run(f, stamp, res, step, reach_max, floor_z, raw=False, box=None, clock=None
 
     out["cand"] = features.candidates(f)
     out["keep"] = features.in_reach(out["cand"], reach_max=reach_max, floor_z=floor_z)
+    if out["handle"] is not None:
+        out["keep"] &= out["handle"]
     clock.lap("candidates")
     return out
 

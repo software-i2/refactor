@@ -7,7 +7,7 @@ world:
   obstacle_field: "/mnt/d/beex/arm_ws/data/field.bin"
 
 camera:
-  at_m: [0.125, -0.2, -0.075]     # empirically derived for this rosbag
+  at_m: [0.1, 0.05, 0]     # empirically derived for this rosbag
   rpy_deg: [90.0, -90.0, 0.0]
 
 arm:
@@ -105,7 +105,7 @@ task:
   rate_hz: 5.0
 
   standoff_m: 0.04
-  max_approach_dev_deg: 0.0
+  max_approach_dev_deg: 0.00
 
   depth_min_m: 0.040
   depth_max_m: 0.065
