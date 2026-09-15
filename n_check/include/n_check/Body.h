@@ -22,6 +22,9 @@ struct Jaws {
     double blade_origin[3] = {kine::NONE, kine::NONE, kine::NONE};
     double open_mm         = kine::NONE;
 
+    static constexpr int PROFILE_BANDS = 18;
+    std::vector<double>  blade_profile;
+
     double grip_margin_m = kine::NONE;
 
     static constexpr double HINGE_RAD_PER_MM = 51.0 / 1000.0;
@@ -36,6 +39,8 @@ struct Jaws {
         doc.nums("jaws.blade_size", blade_size, 3);
         doc.nums("jaws.blade_origin", blade_origin, 3);
         open_mm       = doc.num("jaws.open_mm");
+        blade_profile.assign(PROFILE_BANDS * 5, kine::NONE);
+        doc.nums("jaws.blade_profile", &blade_profile[0], blade_profile.size());
         grip_margin_m = doc.num("jaws.grip_margin_m");
     }
 

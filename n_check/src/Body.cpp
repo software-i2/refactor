@@ -45,8 +45,12 @@ const char *Jaws::missing() const {
             {"jaws.blade_origin", blade_origin, 3},
             {"jaws.open_mm", &open_mm, 1},
             {"jaws.grip_margin_m", &grip_margin_m, 1},
+            {"jaws.blade_profile", blade_profile.data(), static_cast<int>(blade_profile.size())},
     };
 
+    if (blade_profile.size() != static_cast<size_t>(PROFILE_BANDS * 5)) {
+        return "jaws.blade_profile";
+    }
     for (const Field &f : fields) {
         for (int i = 0; i < f.count; ++i) {
             if (!std::isfinite(f.at[i])) {
@@ -89,33 +93,31 @@ void Body::buildLattice() {
         return;
     }
 
-    const double *half = half_;
-    const double centre_lat = centre_lat_, centre_ax = centre_ax_;
-    const double close_lat = close_lat_, close_ax = close_ax_;
-    const double appr_lat = appr_lat_, appr_ax = appr_ax_;
-
-    int n[3];
-    for (int a = 0; a < 3; ++a) {
-        n[a] = static_cast<int>(std::ceil(2.0 * half[a] / pitch_));
-        if (n[a] < 1) {
-            n[a] = 1;
-        }
-    }
+    const double hinge_lat = j_.hinge_xyz[1], hinge_ax = j_.hinge_xyz[2];
 
     // Left blade first, then right, to keep the side association explicit.
     for (int side = 0; side < 2; ++side) {
         const double mirror = side == 0 ? 1.0 : -1.0;
-        for (int i = 0; i <= n[0]; ++i) {
-            const double u = -half[0] + 2.0 * half[0] * i / n[0];  // along the hinge
-            for (int k = 0; k <= n[1]; ++k) {
-                const double v = -half[1] + 2.0 * half[1] * k / n[1];  // closing
-                for (int m = 0; m <= n[2]; ++m) {
-                    const double w = -half[2] + 2.0 * half[2] * m / n[2];  // approach
-                    kine::Vec3   p;
-                    p.x = centre_ax + v * close_ax + w * appr_ax;   // approach
-                    p.y = u;                                        // hinge
-                    p.z = mirror * (centre_lat + v * close_lat + w * appr_lat);
-                    lattice_.push_back(p);
+        for (int b = 0; b < Jaws::PROFILE_BANDS; ++b) {
+            const double *r       = &j_.blade_profile[b * 5];
+            const double  span[3] = {2.0 * r[4], r[3] - r[2], r[1] - r[0]};
+
+            int n[3];
+            for (int a = 0; a < 3; ++a) {
+                n[a] = std::max(1, static_cast<int>(std::ceil(span[a] / pitch_)));
+            }
+            for (int i = 0; i <= n[0]; ++i) {
+                const double u = -r[4] + span[0] * i / n[0];  // along the hinge
+                for (int k = 0; k <= n[1]; ++k) {
+                    const double v = r[2] + span[1] * k / n[1];  // closing
+                    for (int m = 0; m <= n[2]; ++m) {
+                        const double w = r[0] + span[2] * m / n[2];  // approach
+                        kine::Vec3   p;
+                        p.x = hinge_ax - v * s + w * c;   // approach
+                        p.y = u;                          // hinge
+                        p.z = mirror * (hinge_lat + v * c + w * s);
+                        lattice_.push_back(p);
+                    }
                 }
             }
         }

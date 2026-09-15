@@ -95,14 +95,19 @@ def box_in_camera(box, at):
     return corners.min(0), corners.max(0)
 
 
-def _to_arm(packed, lo, res):
-    from n_pcloud.frame import CAM_TO_ARM
+def _square(R):
+    src = np.argmax(np.abs(R), axis=1)
+    return (len(set(int(s) for s in src)) == 3
+            and np.allclose(np.abs(R[np.arange(3), src]), 1.0, atol=1e-9)
+            and np.allclose(np.abs(R).sum(axis=1), 1.0, atol=1e-9))
 
-    src = np.argmax(np.abs(CAM_TO_ARM), axis=1)
-    sign = np.sign(CAM_TO_ARM[np.arange(3), src])
-    dims = np.asarray(packed.shape, dtype=np.int64)
 
-    out = np.transpose(packed, axes=tuple(int(s) for s in src))
+def _permute(grid, lo, res, R):
+    src = np.argmax(np.abs(R), axis=1)
+    sign = np.sign(R[np.arange(3), src])
+    dims = np.asarray(grid.shape, dtype=np.int64)
+
+    out = np.transpose(grid, axes=tuple(int(s) for s in src))
     lo_new = np.empty(3, dtype=np.float64)
     for a in range(3):
         c = int(src[a])
@@ -114,6 +119,12 @@ def _to_arm(packed, lo, res):
     return np.ascontiguousarray(out), lo_new
 
 
+def _to_arm(packed, lo, res):
+    from n_pcloud.frame import CAM_TO_ARM
+
+    return _permute(packed, lo, res, CAM_TO_ARM)
+
+
 def tilted(rpy):
     return rpy is not None and np.any(np.asarray(rpy, dtype=float) != 0.0)
 
@@ -123,6 +134,15 @@ def place(label, lo, res, at, rpy, box=None):
 
     R = cam_to_arm(rpy)
     at = np.asarray(at, dtype=float)
+
+    if _square(R):
+        out, arm_lo = _permute(label, lo, res, R)
+        arm_lo = arm_lo + at
+        if box is not None:
+            first, last = _window(arm_lo, np.asarray(out.shape, dtype=np.int64), res, box, reach_pad(res))
+            if np.all(last > first):
+                return np.ascontiguousarray(out[_cells(first, last)]), arm_lo + first * res
+        return out, arm_lo
     dims = np.asarray(label.shape, dtype=np.int64)
 
     unit = np.array([[i, j, k] for i in (0, 1) for j in (0, 1) for k in (0, 1)], dtype=float)
