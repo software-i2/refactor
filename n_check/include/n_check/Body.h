@@ -96,7 +96,7 @@ private:
 };
 
 double lowestZ(const Body::Volume &v);
-int firstBlocked(const Field &f, const Body::Volume &v);
+int firstBlocked(const Field &f, const Body::Volume &v, bool grip);
 bool blocksItself(const Field &f, const Body &b, const kine::Geom &g,
                   const kine::Joints &safe, std::string &why);
 bool fitsField(const Body &b, const Field &f, std::string &why);

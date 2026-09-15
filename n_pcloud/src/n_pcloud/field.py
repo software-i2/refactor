@@ -34,7 +34,7 @@ def jaw_radius(res, pitch=None):
 
 
 def links_for(res):
-    return CAPSULES + (("jaw", jaw_radius(res)),)
+    return CAPSULES + (("jaw", jaw_radius(res)), ("jaw_handle", jaw_radius(res)))
 
 
 def reach_pad(res):

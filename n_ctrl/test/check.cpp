@@ -106,7 +106,7 @@ int main(int argc, char **argv) {
     const check::Body       body(jaws, 0.0);
     std::vector<kine::Vec3> scratch;
     std::string             why;
-    expect(admit(g, p, path, no_field, body, scratch, why) == Status::OK, "the path is admitted");
+    expect(admit(g, p, path, no_field, body, false, scratch, why) == Status::OK, "the path is admitted");
 
     Path   line;
     double dev = 0.0;
@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
 
     Params floored = p;
     floored.floor_z_m = 1.0;
-    expect(admit(g, floored, path, no_field, body, scratch, why) == Status::FLOOR,
+    expect(admit(g, floored, path, no_field, body, false, scratch, why) == Status::FLOOR,
           "a path under the floor is refused");
 
     FakeArm arm;
@@ -204,7 +204,7 @@ int main(int argc, char **argv) {
     Path outside;
     outside.push_back(goal);
     outside[0][kine::BASE] = g.windowHi(kine::BASE) + 0.1;
-    expect(admit(g, floored, outside, no_field, body, scratch, why) == Status::LIMIT,
+    expect(admit(g, floored, outside, no_field, body, false, scratch, why) == Status::LIMIT,
            "a waypoint outside the window is refused as LIMIT before the floor is asked");
 
     kine::Joints edge = rest;
@@ -235,7 +235,7 @@ int main(int argc, char **argv) {
         std::string  err;
         if (real.load(argv[2], err)) {
             const check::Body real_body(jaws, check::Jaws::bladePitch(real.res()));
-            const Status s = admit(g, p, path, real, real_body, scratch, why);
+            const Status s = admit(g, p, path, real, real_body, false, scratch, why);
             std::printf("  with %s: %s\n", argv[2], why.empty() ? "admitted" : why.c_str());
             expect(s != Status::OBSTACLE || why.find("waypoint") != std::string::npos,
                    "an obstacle refusal names the part and the waypoint");
@@ -265,7 +265,7 @@ int main(int argc, char **argv) {
 
             Path leg1;
             planJoint(p, rest, h.standoff, leg1);
-            expect(admit(g, p, leg1, none, body, scratch, why) == Status::OK,
+            expect(admit(g, p, leg1, none, body, false, scratch, why) == Status::OK,
                    "the standoff leg is admitted");
             exec.load(leg1);
             while (exec.busy()) { exec.measure(arm.at); exec.tick(t); t += 1.0 / p.rate_hz; }
@@ -299,7 +299,7 @@ int main(int argc, char **argv) {
             double dev = 0.0;
             const Status s2 = planLine(g, p, arm.at, wired, leg2, dev);
             expect(s2 == Status::OK, "the advance leg plans");
-            expect(admit(g, p, leg2, none, body, scratch, why) == Status::OK,
+            expect(admit(g, p, leg2, none, body, true, scratch, why) == Status::OK,
                    "the advance leg is admitted");
             std::printf("  advance: %zu waypoints, strays %.2e m off the approach line\n",
                         leg2.size(), dev);

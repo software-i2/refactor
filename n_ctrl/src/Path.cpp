@@ -230,6 +230,7 @@ Status admit(const kine::Geom &g,
              const Path &path,
              const check::Field &field,
              const check::Body &body,
+             bool grip,
              std::vector<kine::Vec3> &scratch,
              std::string &why) {
 
@@ -271,7 +272,7 @@ Status admit(const kine::Geom &g,
         }
 
         if (field.ok()) {
-            const int hit = check::firstBlocked(field, vol);
+            const int hit = check::firstBlocked(field, vol, grip);
             if (hit >= 0) {
                 std::snprintf(buf, sizeof(buf), "%s: the %s does, at waypoint %u of %u",
                               reason(Status::OBSTACLE), check::name(hit),

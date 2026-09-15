@@ -274,7 +274,7 @@ int main(int argc, char **argv) {
                 q[kine::BASE] = base;
                 q[kine::SHOULDER] = sh;
                 body.volume(g, q, buf, v);
-                const int hit = firstBlocked(f, v);
+                const int hit = firstBlocked(f, v, false);
                 ++tested;
                 if (hit >= 0) { ++hits; if (first < 0) first = hit; }
             }

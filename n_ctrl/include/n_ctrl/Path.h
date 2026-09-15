@@ -140,6 +140,7 @@ Status admit(const kine::Geom &g,
              const Path &path,
              const check::Field &field,
              const check::Body &body,
+             bool grip,
              std::vector<kine::Vec3> &scratch,
              std::string &why);
 

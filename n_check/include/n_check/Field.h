@@ -11,7 +11,7 @@
 
 namespace check {
 
-enum Link : int { UPPER_ARM = 0, FOREARM, WRIST_MOUNT, PALM, JAW, N_LINKS };
+enum Link : int { UPPER_ARM = 0, FOREARM, WRIST_MOUNT, PALM, JAW, JAW_HANDLE, N_LINKS };
 
 class Field {
 public:
@@ -54,7 +54,7 @@ private:
     double   step_ = 0.01;
     double   lo_[3] = {0.0, 0.0, 0.0};
     int32_t  dims_[3] = {0, 0, 0};
-    double   radii_[N_LINKS] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    double   radii_[N_LINKS] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     double   placement_[3] = {0.0, 0.0, 0.0};
     double   rpy_[3]       = {0.0, 0.0, 0.0};
     uint64_t digest_   = 0;

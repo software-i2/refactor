@@ -288,7 +288,7 @@ void Node::publishBody(const kine::Joints &q) {
     check::Body::Volume v;
     body_->volume(g_, q, viz_scratch_, v);
 
-    const int hit = field_.empty() ? -1 : check::firstBlocked(field_, v);
+    const int hit = field_.empty() ? -1 : check::firstBlocked(field_, v, true);
 
     Msg_MarkerArray  msg;
     const kine::Vec3 *axis[4][2] = {{&v.shoulder, &v.elbow},
@@ -321,7 +321,7 @@ bool Node::snapshot(kine::Joints &q) {
     return seen_;
 }
 
-void Node::run(const Path &path, const kine::Joints &from, Move &out, bool record) {
+void Node::run(const Path &path, const kine::Joints &from, Move &out, bool grip, bool record) {
     if (exec_.busy()) {
         out.status = Status::BUSY;
         out.note   = reason(Status::BUSY);
@@ -329,7 +329,7 @@ void Node::run(const Path &path, const kine::Joints &from, Move &out, bool recor
     }
 
     std::string  why;
-    const Status s = admit(g_, p_, path, field_, *body_, scratch_, why);
+    const Status s = admit(g_, p_, path, field_, *body_, grip, scratch_, why);
     if (s != Status::OK) {
         out.status = s;
         out.note   = why;
@@ -371,7 +371,7 @@ Move Node::moveJoints(const kine::Joints &goal, bool record) {
 
     Path path;
     planJoint(p_, q, goal, path);
-    run(path, q, out, record);
+    run(path, q, out, false, record);
     return out;
 }
 
@@ -404,7 +404,7 @@ Move Node::moveGrasp(const Leg &leg) {
                   kine::rad2deg(leg.q_wrist));
     out.note = buf;
 
-    run(path, q, out);
+    run(path, q, out, true);
     return out;
 }
 
@@ -446,7 +446,7 @@ Move Node::move(const kine::Vec3 &v, bool straight, bool relative) {
         planJoint(p_, q, goal, path);
     }
 
-    run(path, q, out);
+    run(path, q, out, false);
     return out;
 }
 
@@ -564,7 +564,7 @@ bool Node::onReturn(Srv_Trigger_Request & /*req*/, Srv_Trigger_Response &res) {
     const Path home = trail_.back();
     out.to          = kine::forward(g_, home.back()).throat;
 
-    run(home, q, out, false);
+    run(home, q, out, true, false);
     report(out, "return");
     retracing_ = out.ok();
 

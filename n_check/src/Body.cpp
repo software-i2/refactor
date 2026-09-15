@@ -207,7 +207,7 @@ bool blocksItself(const Field &f, const Body &b, const kine::Geom &g,
     Body::Volume            v;
     b.volume(g, safe, buf, v);
 
-    const int hit = firstBlocked(f, v);
+    const int hit = firstBlocked(f, v, false);
     if (hit < 0) {
         return false;
     }
@@ -222,10 +222,11 @@ bool blocksItself(const Field &f, const Body &b, const kine::Geom &g,
     return true;
 }
 
-int firstBlocked(const Field &f, const Body::Volume &v) {
+int firstBlocked(const Field &f, const Body::Volume &v, bool grip) {
     if (!f.ok()) {
         return -1;
     }
+    const int jaw = grip ? JAW : JAW_HANDLE;
     if (f.blockedSegment(v.shoulder, v.elbow, UPPER_ARM)) {
         return V_UPPER_ARM;
     }
@@ -239,10 +240,10 @@ int firstBlocked(const Field &f, const Body::Volume &v) {
         return V_PALM;
     }
     if (v.count > 0) {
-        if (f.blockedPoints(v.blades, v.left, JAW)) {
+        if (f.blockedPoints(v.blades, v.left, jaw)) {
             return V_BLADE_LEFT;
         }
-        if (f.blockedPoints(v.blades + v.left, v.count - v.left, JAW)) {
+        if (f.blockedPoints(v.blades + v.left, v.count - v.left, jaw)) {
             return V_BLADE_RIGHT;
         }
     }

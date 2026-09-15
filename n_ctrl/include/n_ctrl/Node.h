@@ -57,7 +57,7 @@ private:
     Move moveGrasp(const Leg &leg);
 
     bool snapshot(kine::Joints &q);
-    void run(const Path &path, const kine::Joints &from, Move &out, bool record = true);
+    void run(const Path &path, const kine::Joints &from, Move &out, bool grip, bool record = true);
     void report(const Move &m, const char *what);
     void publishPose(const kine::Joints &q);
     void publishBody(const kine::Joints &q);

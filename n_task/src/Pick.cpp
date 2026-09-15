@@ -92,7 +92,7 @@ check::Block drivable(const kine::Geom &g,
     if (ctrl::planLine(g, motion, h.standoff, leg, line, dev) != ctrl::Status::OK) {
         return check::Block::NO_LINE;
     }
-    switch (ctrl::admit(g, motion, line, f, b, scratch, why)) {
+    switch (ctrl::admit(g, motion, line, f, b, true, scratch, why)) {
     case ctrl::Status::OK:
         break;
     case ctrl::Status::FLOOR:
@@ -105,7 +105,7 @@ check::Block drivable(const kine::Geom &g,
 
     ctrl::Path route;
     ctrl::planJoint(motion, from, h.standoff, route);
-    if (ctrl::admit(g, motion, route, f, b, scratch, why) != ctrl::Status::OK) {
+    if (ctrl::admit(g, motion, route, f, b, false, scratch, why) != ctrl::Status::OK) {
         return check::Block::NO_ROUTE;
     }
     return check::Block::NONE;
