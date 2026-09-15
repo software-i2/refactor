@@ -34,7 +34,7 @@ def main():
     p = build.Params(at, rpy,
                      res=rospy.get_param("~res", 0.005),
                      step=rospy.get_param("~step", 0.002),
-                     reach_max=rospy.get_param("~reach_max", 0.35),
+                     reach_max=rospy.get_param("~reach_max", 0.376),
                      floor_z=rospy.get_param("~floor_z", 0.0),
                      full=rospy.get_param("~full", False))
     src = os.path.abspath(rospy.get_param("~inbox"))
