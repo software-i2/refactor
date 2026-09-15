@@ -15,11 +15,12 @@ NAME = {UNKNOWN: "unknown", FREE: "free", OBSTACLE: "obstacle", TARGET: "target"
 
 BLOCKING = (OBSTACLE,)
 
-SUPPORT_TOL = 0.004
+SUPPORT_TOL = 0.003 
 SUPPORT_MIN = 5
 SUPPORT_WINDOW = 5
 CARVE_MIN_HITS = 2
 HANDLE_RADIUS = 0.005
+BAR_GAP = 0.015
 PAD = 0.02
 
 
@@ -183,7 +184,7 @@ def classify(xyz, res=0.005, pad=PAD, tol=None, chunk=32, keep=None,
     return state, lo
 
 
-def _grasp_voxels(grasps, lo, res, dims, radius):
+def _grasp_voxels(grasps, lo, res, dims, radius, gap=BAR_GAP):
     gidx, ginside = world_to_index(grasps, lo, res, dims)
     gidx = gidx[ginside]
 
@@ -196,6 +197,23 @@ def _grasp_voxels(grasps, lo, res, dims, radius):
 
     near = np.zeros(tuple(dims), dtype=bool)
     near[hit[:, 0], hit[:, 1], hit[:, 2]] = True
+
+    ends = np.asarray(grasps, dtype=float)
+    for a, b in zip(ends[:-1], ends[1:]):
+        ab = b - a
+        length = np.linalg.norm(ab)
+        if length <= 0.0 or length > gap:
+            continue
+        first = np.clip(np.floor((np.minimum(a, b) - radius - lo) / res).astype(np.int64), 0, dims)
+        last = np.clip(np.floor((np.maximum(a, b) + radius - lo) / res).astype(np.int64) + 1, 0, dims)
+        if np.any(last <= first):
+            continue
+        axes = np.meshgrid(*[np.arange(first[k], last[k]) for k in range(3)], indexing="ij")
+        cells = np.stack(axes, axis=-1).reshape(-1, 3)
+        centre = lo + (cells + 0.5) * res
+        t = np.clip((centre - a).dot(ab) / (length * length), 0.0, 1.0)
+        close = cells[np.linalg.norm(centre - a - np.outer(t, ab), axis=1) <= radius]
+        near[close[:, 0], close[:, 1], close[:, 2]] = True
     return near
 
 

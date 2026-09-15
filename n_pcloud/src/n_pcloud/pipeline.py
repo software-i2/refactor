@@ -26,7 +26,7 @@ class Clock(object):
 def stamp(ply_path, json_path, at, rpy, res, step, raw=False, box=None):
     filt = () if raw else (occ.SUPPORT_TOL, occ.SUPPORT_MIN,
                            occ.SUPPORT_WINDOW, occ.CARVE_MIN_HITS,
-                           occ.HANDLE_RADIUS)
+                           occ.HANDLE_RADIUS, occ.BAR_GAP)
     return digest(ply_path, json_path, res, step, at, field.links_for(res), filt, rpy, box)
 
 
