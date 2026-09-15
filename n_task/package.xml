@@ -10,6 +10,7 @@
 
   <depend>n_kine</depend>
   <depend>n_check</depend>
+  <depend>n_check_rrt</depend>
   <depend>n_ctrl</depend>
   <depend>n_driver</depend>
   <depend>bx_msgs</depend>

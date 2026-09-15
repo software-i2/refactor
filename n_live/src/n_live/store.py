@@ -41,6 +41,14 @@ def commit(out, fid, staged):
     return final
 
 
+def keep(src, out):
+    fid = os.path.basename(os.path.normpath(src))
+    part = os.path.join(out, ".%s.part" % fid)
+    shutil.rmtree(part, ignore_errors=True)
+    shutil.copytree(src, part)
+    return commit(out, fid, part)
+
+
 def prune(out, keep):
     frames = []
     for name in os.listdir(out):

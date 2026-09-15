@@ -74,10 +74,10 @@ def arrows(header, cand):
 
 
 class Board(object):
-    def __init__(self, stride=2, every=7):
+    def __init__(self, stride=2, every=7, prefix="viz/"):
         self.stride = stride
         self.every = every
-        self.pub = dict((name, rospy.Publisher("viz/" + name, kind, queue_size=1, latch=True))
+        self.pub = dict((name, rospy.Publisher(prefix + name, kind, queue_size=1, latch=True))
                         for name, kind in (("field", PointCloud2), ("obstacle", PointCloud2),
                                            ("cloud", PointCloud2), ("target", PointCloud2),
                                            ("scene", PointCloud2),

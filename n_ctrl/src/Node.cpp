@@ -157,6 +157,12 @@ void Node::loadField(const std::string &path) {
     openField(path, field_, body_);
 }
 
+void Node::useRrt(const rrt::Settings &s) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+    rrt_    = s;
+    rrt_on_ = true;
+}
+
 bool Node::openField(const std::string &path, check::Field &field,
                      std::unique_ptr<check::Body> &body) {
     const std::vector<check::Note> notes =
@@ -288,7 +294,7 @@ void Node::publishBody(const kine::Joints &q) {
     check::Body::Volume v;
     body_->volume(g_, q, viz_scratch_, v);
 
-    const int hit = field_.empty() ? -1 : check::firstBlocked(field_, v, true);
+    const int hit = field_.empty() ? -1 : check::firstBlocked(field_, v, false);
 
     Msg_MarkerArray  msg;
     const kine::Vec3 *axis[4][2] = {{&v.shoulder, &v.elbow},
@@ -370,7 +376,25 @@ Move Node::moveJoints(const kine::Joints &goal, bool record) {
     out.to   = kine::forward(g_, goal).throat;
 
     Path path;
-    planJoint(p_, q, goal, path);
+    if (rrt_on_ && record && body_) {
+        rrt::Stats        st;
+        const rrt::Result r = rrt::plan(g_, *body_, field_, rrt_, p_.floor_z_m, q, goal, scratch_,
+                                        path, st);
+        if (r != rrt::Result::OK) {
+            out.status = r == rrt::Result::GOAL_FLOOR ? Status::FLOOR
+                         : r == rrt::Result::GOAL_OUTSIDE || r == rrt::Result::START_OUTSIDE
+                                 ? Status::LIMIT
+                                 : Status::OBSTACLE;
+            out.note = std::string("rrt* found no route: ") + rrt::name(r);
+            return out;
+        }
+        LOG_INFO("[ctrl] rrt* %s: %u corners, %d iterations, %u nodes, %u waypoints, %.3f s",
+                 st.direct ? "straight" : "tree", static_cast<uint32_t>(st.corners),
+                 st.iterations, static_cast<uint32_t>(st.nodes),
+                 static_cast<uint32_t>(path.size()), st.total_s);
+    } else {
+        planJoint(p_, q, goal, path);
+    }
     run(path, q, out, false, record);
     return out;
 }
@@ -404,7 +428,7 @@ Move Node::moveGrasp(const Leg &leg) {
                   kine::rad2deg(leg.q_wrist));
     out.note = buf;
 
-    run(path, q, out, true);
+    run(path, q, out, false);
     return out;
 }
 

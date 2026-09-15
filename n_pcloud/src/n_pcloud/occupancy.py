@@ -3,8 +3,6 @@
 
 from __future__ import print_function
 
-import warnings
-
 import numpy as np
 from scipy import ndimage
 
@@ -26,9 +24,6 @@ BAR_GAP = 0.015
 PAD = 0.02
 CORRIDOR_LENGTH = 0.04
 CORRIDOR_RADIUS = 0.02
-HANDLE_GAP = 0.04
-HANDLE_WINDOW = 0.10
-HANDLE_ACROSS = 0.03
 
 
 def _axis_lattice(a, min_gap=1e-5):
@@ -107,60 +102,6 @@ def flying_pixels(xyz, tol=SUPPORT_TOL, need=SUPPORT_MIN, window=SUPPORT_WINDOW)
     drop[on] = ~(valid & (agree >= need))[py[on], px[on]]
     return drop
 
-
-def _along(L, s):
-    return np.clip(np.searchsorted(L, L + s), 0, len(L) - 1)
-
-
-def handle_poses(xyz, pos, gap=HANDLE_GAP, window=HANDLE_WINDOW, across=HANDLE_ACROSS):
-    pos = np.asarray(pos, dtype=float)
-    n = len(pos)
-    if not n:
-        return np.zeros(0, dtype=bool)
-
-    intr = _intrinsics(xyz)
-    img = _depth_image(xyz, intr)
-    h, w = img.shape
-
-    z0 = -pos[:, 2]
-    ahead = z0 > 1e-6
-    safe_z = np.where(ahead, z0, 1.0)
-    u = intr["fx"] * pos[:, 0] / safe_z + intr["cx"]
-    v = intr["fy"] * pos[:, 1] / safe_z + intr["cy"]
-
-    L = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(pos, axis=0), axis=1))]
-    fwd, back = _along(L, 0.01), _along(L, -0.01)
-    tu, tv = u[fwd] - u[back], v[fwd] - v[back]
-    tn = np.hypot(tu, tv)
-    moving = ahead & (tn >= 1e-6)
-    tn = np.where(moving, tn, 1.0)
-    nu, nv = -tv / tn, tu / tn
-
-    offs = np.linspace(across / 3.0, across, 5)
-    g = np.full((n, 2, len(offs)), np.nan)
-    for side, sg in enumerate((1.0, -1.0)):
-        for m, o in enumerate(offs):
-            ui = np.rint(u + sg * nu * intr["fx"] * o / safe_z).astype(np.int64)
-            vi = np.rint(v + sg * nv * intr["fy"] * o / safe_z).astype(np.int64)
-            ok = moving & (ui >= 1) & (ui < w - 1) & (vi >= 1) & (vi < h - 1)
-            if not ok.any():
-                continue
-            patch = np.stack([img[vi[ok] + dy, ui[ok] + dx]
-                              for dy in (-1, 0, 1) for dx in (-1, 0, 1)], axis=1)
-            g[ok, side, m] = np.median(patch, axis=1) - z0[ok]
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        per_pose = np.nanmean(np.nanmin(g, axis=1), axis=1)
-
-    lo, hi = _along(L, -window / 2.0), _along(L, window / 2.0)
-    smooth = np.full(n, np.nan)
-    for i in range(n):
-        q = per_pose[lo[i]:hi[i] + 1]
-        q = q[np.isfinite(q)]
-        if len(q):
-            smooth[i] = np.median(q)
-    return np.isfinite(smooth) & (np.where(np.isfinite(smooth), smooth, -np.inf) >= gap)
 
 
 def near_grasps(xyz, grasps, res=0.0025, pad=PAD, radius=HANDLE_RADIUS):

@@ -51,9 +51,33 @@ int main(int argc, char **argv) {
         return -1;
     }
 
+    std::string rrt_config;
+    GET_ROS_PARAM("~rrt_config", rrt_config, rrt_config);
+    rrt::Settings rrt_settings;
+    if (!rrt_config.empty()) {
+        conf::Doc rrt_doc;
+        rrt_doc.load(rrt_config, {"rrt"});
+        rrt_settings.load(rrt_doc);
+        if (!rrt_doc.ok() || rrt_settings.missing() != NULL) {
+            LOG_ERROR("[task] %s is not usable (%s):\n%s", rrt_config.c_str(),
+                      rrt_settings.missing() != NULL ? rrt_settings.missing() : "see below",
+                      rrt_doc.report().c_str());
+            return -1;
+        }
+        rrt_settings.check_step_deg = motion.max_joint_step_deg;
+    }
+
     LOG_INFO("[task] config loaded: %s", config.c_str());
 
     task::Node node(p, motion, arm, jaws, limits, field_path);
+    if (!rrt_config.empty()) {
+        node.useRrt(rrt_settings);
+        LOG_WARN("[task] RRT* trial on: %s (%s)",
+                 rrt_settings.standoff
+                         ? "a blocked route to the standoff is retried with RRT*"
+                         : "no standoff, RRT* straight to the grasp, advance is a zero-length leg",
+                 rrt_config.c_str());
+    }
     LOG_INFO("[task] node started");
 
     ROS_ASYNC_SPIN(2)

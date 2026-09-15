@@ -9,6 +9,7 @@
 #include <n_task/Params.h>
 #include <n_task/FSM.h>
 #include <n_task/Pick.h>
+#include <n_task/PickRrt.h>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/String.h>
 
@@ -24,6 +25,7 @@ public:
          const check::Jaws &jaws, const reach::Limits &limits, const std::string &field_path);
 
     void tick();
+    void useRrt(const rrt::Settings &s);
 
 private:
     void onStates(const sensor_msgs::JointState::ConstPtr &msg);
@@ -70,6 +72,7 @@ private:
     DECLARE_ROS_PUBLISHER(pub_step_, std_msgs::String)
     DECLARE_ROS_PUBLISHER(pub_chosen_, Msg_PoseArray)
     DECLARE_ROS_PUBLISHER(pub_grip_, Msg_UInt8)
+    DECLARE_ROS_PUBLISHER(pub_planned_, std_msgs::String)
 
     DECLARE_ROS_SERVICE_SERVER(srv_plan_, Srv_SetFloat32Array)
     DECLARE_ROS_SERVICE_SERVER(srv_plan_live_, Srv_Trigger)
@@ -99,6 +102,9 @@ private:
     check::Field                 field_;
     std::unique_ptr<check::Body> body_;
     std::vector<kine::Vec3>      scratch_;
+
+    rrt::Settings rrt_;
+    bool          rrt_on_ = false;
 
     // Service callbacks run on the spinner threads, tick() on the main loop.
     // work_mtx_ covers the plan and the step machine; state_mtx_ only the

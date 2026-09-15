@@ -3,7 +3,7 @@ project(n_ctrl)
 
 # BEEX_CMAKE folds this into its find_package(catkin) and catkin_package(), which
 # is what puts n_kine's headers and its library on the line.
-set(EXTRA_CATKIN_PROJECTS n_kine n_check n_conf)
+set(EXTRA_CATKIN_PROJECTS n_kine n_check n_conf n_check_rrt)
 
 find_file(BEEX_CMAKE_INCLUDE bx_msgs/include/BEEX_CMAKE.txt HINTS ../../ ../ REQUIRED)
 include(${BEEX_CMAKE_INCLUDE})

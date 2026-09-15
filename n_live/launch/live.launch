@@ -17,6 +17,10 @@
         <param name="full" type="bool" value="$(arg full)"/>
     </node>
 
+    <node name="n_live_planned" pkg="n_live" type="planned.py" output="screen">
+        <param name="out" type="str" value="$(arg data)/planned"/>
+    </node>
+
     <node if="$(eval arg('cloud') != '')" name="n_live_listen" pkg="n_live" type="listen.py"
           output="screen">
         <param name="inbox" type="str" value="$(arg data)/in"/>

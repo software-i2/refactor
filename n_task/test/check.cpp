@@ -262,7 +262,7 @@ int main(int argc, char **argv) {
                 double     dev = 0.0;
                 drives = drives
                          && ctrl::planLine(g, motion, from, leg, line, dev) == ctrl::Status::OK
-                         && ctrl::admit(g, motion, line, none, body, true, scratch, admit_why)
+                         && ctrl::admit(g, motion, line, none, body, false, scratch, admit_why)
                                     == ctrl::Status::OK
                          && kine::norm(kine::forward(g, line.back()).throat - c.hold.point) < 1e-9;
             }

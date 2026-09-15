@@ -5,5 +5,5 @@ find_package(catkin REQUIRED)
 catkin_python_setup()
 catkin_package()
 
-catkin_install_python(PROGRAMS scripts/live.py scripts/listen.py
+catkin_install_python(PROGRAMS scripts/live.py scripts/listen.py scripts/planned.py
                       DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

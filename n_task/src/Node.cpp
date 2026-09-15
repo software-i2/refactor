@@ -65,6 +65,7 @@ Node::Node(const Params &p, const ctrl::Params &motion, const kine::Params &arm,
     INIT_ROS_PUBLISHER(pub_step_, std_msgs::String, "task/step", 1);
     INIT_ROS_PUBLISHER(pub_chosen_, Msg_PoseArray, "task/chosen", 1);
     INIT_ROS_PUBLISHER(pub_grip_, Msg_UInt8, "task/grip", 1);
+    INIT_ROS_PUBLISHER(pub_planned_, std_msgs::String, "task/planned_frame", 1);
     INIT_ROS_SUBSCRIBER(sub_states_, "joint_states", 1, &Node::onStates);
     INIT_ROS_SUBSCRIBER(sub_ctrl_, "ctrl/state", 10, &Node::onCtrlState);
     INIT_ROS_SUBSCRIBER(sub_frame_, "live/frame", 1, &Node::onFrame);
@@ -100,6 +101,12 @@ Node::Node(const Params &p, const ctrl::Params &motion, const kine::Params &arm,
 // The task and controller use the same field loader; mismatches show up in logs.
 void Node::loadField(const std::string &path) {
     openField(path, field_, body_);
+}
+
+void Node::useRrt(const rrt::Settings &s) {
+    std::lock_guard<std::mutex> work(work_mtx_);
+    rrt_    = s;
+    rrt_on_ = true;
 }
 
 bool Node::openField(const std::string &path, check::Field &field,
@@ -202,7 +209,9 @@ bool Node::plan(const std::vector<float> &data, std::string &why) {
     }
 
     // Solve every candidate first; ranking is based on the resulting postures.
-    last_       = choose(g_, *body_, field_, p_.ask, motion_, candidates, seed, scratch_);
+    last_       = rrt_on_ ? chooseRrt(g_, *body_, field_, p_.ask, motion_, rrt_, candidates, seed,
+                                      scratch_)
+                          : choose(g_, *body_, field_, p_.ask, motion_, candidates, seed, scratch_);
     candidates_ = candidates;
 
     report();
@@ -684,7 +693,9 @@ bool Node::planLive(const std::string &frame, std::string &msg) {
         }
         if (loaded) {
             const Choice trial =
-                    choose(g_, *body, field, p_.ask, motion_, candidates, seed, scratch_);
+                    rrt_on_ ? chooseRrt(g_, *body, field, p_.ask, motion_, rrt_, candidates, seed,
+                                        scratch_)
+                            : choose(g_, *body, field, p_.ask, motion_, candidates, seed, scratch_);
             loaded = trial.found;
             why    = summarise(trial, candidates);
         }
@@ -718,6 +729,11 @@ bool Node::planLive(const std::string &frame, std::string &msg) {
         std::swap(field_, field);
         body_.swap(body);
         planned = plan(data, why);
+    }
+    if (planned) {
+        std_msgs::String kept;
+        kept.data = frame;
+        PUBLISH_ROS(pub_planned_, kept);
     }
     enter(afterPlan(from, planned));
     msg = id + ": " + why;

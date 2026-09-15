@@ -7,7 +7,7 @@ from __future__ import print_function
 
 import time
 
-from n_pcloud import features, field
+from n_pcloud import features, field, handles
 from n_pcloud import occupancy as occ
 from n_pcloud.field_format import digest
 
@@ -29,7 +29,7 @@ def stamp(ply_path, json_path, at, rpy, res, step, raw=False, box=None, all_pose
                            occ.HANDLE_RADIUS, occ.BAR_GAP,
                            occ.CORRIDOR_LENGTH, occ.CORRIDOR_RADIUS)
     if not all_poses:
-        filt += (occ.HANDLE_GAP, occ.HANDLE_WINDOW, occ.HANDLE_ACROSS)
+        filt += handles.SETTINGS
     return digest(ply_path, json_path, res, step, at, field.links_for(res), filt, rpy, box)
 
 
@@ -54,7 +54,7 @@ def run(f, stamp, res, step, reach_max, floor_z, raw=False, box=None, clock=None
 
     pick = slice(None)
     if not all_poses:
-        out["handle"] = occ.handle_poses(f.points, f.pos)
+        out["handle"] = handles.handle_poses(f.points, f.pos)
         pick = out["handle"]
         clock.lap("handles")
 

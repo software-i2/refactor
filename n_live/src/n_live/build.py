@@ -10,7 +10,7 @@ import os
 import shutil
 import time
 
-from n_live import store
+from n_live import inbox, store
 from n_pcloud import field, frame, pipeline
 
 FIELD = "field.bin"
@@ -72,3 +72,16 @@ def build(fid, ply, js, folder, p):
     with open(os.path.join(folder, store.MARK), "w") as fh:
         json.dump(doc, fh, indent=2, sort_keys=True)
     return doc, r
+
+
+def rebuild(folder):
+    with open(os.path.join(folder, store.MARK)) as fh:
+        doc = json.load(fh)
+    fid = doc["id"]
+    ply = os.path.join(folder, fid + inbox.PLY)
+    js = os.path.join(folder, fid + inbox.JSON)
+    p = Params(doc["at"], doc["rpy"], doc["res"], doc["step"], doc["reach_max"], doc["floor_z"],
+               not doc["cropped"])
+    stamp = pipeline.stamp(ply, js, p.at, p.rpy, p.res, p.step, False, p.box)
+    f = frame.read(fid, ply, js, p.at, p.rpy)
+    return doc, pipeline.run(f, stamp, p.res, p.step, p.reach_max, p.floor_z, False, p.box)

@@ -7,6 +7,7 @@
 #include <n_ctrl/Bridge.h>
 #include <n_ctrl/Exec.h>
 #include <n_ctrl/Trail.h>
+#include <n_check_rrt/Rrt.h>
 #include <sensor_msgs/JointState.h>
 
 #include <memory>
@@ -21,6 +22,7 @@ public:
          const reach::Limits &limits, const std::string &field_path);
 
     void tick();
+    void useRrt(const rrt::Settings &s);
 
 private:
     class TopicSink : public Sink {
@@ -91,6 +93,9 @@ private:
     std::unique_ptr<check::Body> body_;
     std::vector<kine::Vec3>      scratch_;
     std::vector<kine::Vec3>      viz_scratch_;
+
+    rrt::Settings rrt_;
+    bool          rrt_on_ = false;
 
     TopicSink  sink_;
     Exec       exec_;

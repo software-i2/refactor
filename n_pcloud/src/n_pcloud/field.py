@@ -34,7 +34,7 @@ def jaw_radius(res, pitch=None):
 
 
 def links_for(res):
-    return CAPSULES + (("jaw", jaw_radius(res)), ("jaw_handle", jaw_radius(res)))
+    return CAPSULES + (("jaw", jaw_radius(res)), ("jaw_approach", jaw_radius(res)))
 
 
 def reach_pad(res):
@@ -55,8 +55,11 @@ def build(label, lo, res, step):
 
     packed = np.zeros(grid.shape, dtype=np.uint8)
     for bit, (name, radius) in enumerate(links):
-        source = jaw_edt if name == "jaw" else edt
-        packed |= (source <= radius).astype(np.uint8) << bit
+        source = jaw_edt if name in ("jaw", "jaw_approach") else edt
+        layer = source <= radius
+        if name == "jaw_approach":
+            layer |= exempt
+        packed |= layer.astype(np.uint8) << bit
 
     return {"packed": packed, "lo": np.asarray(lo, dtype=float), "res": res,
             "step": step, "links": links,

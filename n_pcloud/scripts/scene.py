@@ -14,7 +14,7 @@ import time
 
 import numpy as np
 
-from n_pcloud import field, frame, pipeline
+from n_pcloud import field, frame, handles, pipeline
 from n_pcloud import occupancy as occ
 from n_pcloud.field_format import read_header
 
@@ -136,8 +136,8 @@ def main():
 
     keep = r["keep"]
     if r["handle"] is not None:
-        print("  %d of %d poses look like handle (backdrop gap >= %.0f mm)"
-              % (int(r["handle"].sum()), len(r["handle"]), occ.HANDLE_GAP * 1000))
+        print("  %d of %d poses look like handle (curve model score >= %.2f)"
+              % (int(r["handle"].sum()), len(r["handle"]), handles.THRESHOLD))
     print("  %d of %d candidates are %swithin reach and above the floor"
           % (int(keep.sum()), len(r["cand"]), "handles " if r["handle"] is not None else ""))
 

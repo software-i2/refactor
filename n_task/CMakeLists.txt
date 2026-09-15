@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(n_task)
 
-set(EXTRA_CATKIN_PROJECTS n_kine n_check n_conf)
+set(EXTRA_CATKIN_PROJECTS n_kine n_check n_conf n_check_rrt)
 
 find_file(BEEX_CMAKE_INCLUDE bx_msgs/include/BEEX_CMAKE.txt HINTS ../../ ../ REQUIRED)
 include(${BEEX_CMAKE_INCLUDE})
@@ -17,6 +17,7 @@ compile_my_exec(n_task_node
                 src/main.cpp
                 src/Node.cpp
                 src/Pick.cpp
+                src/PickRrt.cpp
                 src/FSM.cpp
                 ${N_CTRL_PATH})
 target_link_libraries(n_task_node pthread)

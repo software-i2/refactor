@@ -1,0 +1,11 @@
+rrt:
+  standoff: false
+  iterations: 3000
+  refine_iterations: 300
+  budget_s: 0.5
+  extend_rad: 1.0
+  rewire_gamma: 10.0
+  check_step_deg: 1.0
+  grip_zone_m: 0.06
+  shortcut_tries: 100
+  seed: 1

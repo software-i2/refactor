@@ -299,7 +299,7 @@ int main(int argc, char **argv) {
             double dev = 0.0;
             const Status s2 = planLine(g, p, arm.at, wired, leg2, dev);
             expect(s2 == Status::OK, "the advance leg plans");
-            expect(admit(g, p, leg2, none, body, true, scratch, why) == Status::OK,
+            expect(admit(g, p, leg2, none, body, false, scratch, why) == Status::OK,
                    "the advance leg is admitted");
             std::printf("  advance: %zu waypoints, strays %.2e m off the approach line\n",
                         leg2.size(), dev);

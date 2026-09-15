@@ -42,9 +42,31 @@ int main(int argc, char **argv) {
         return -1;
     }
 
+    std::string rrt_config;
+    GET_ROS_PARAM("~rrt_config", rrt_config, rrt_config);
+    rrt::Settings rrt_settings;
+    if (!rrt_config.empty()) {
+        conf::Doc rrt_doc;
+        rrt_doc.load(rrt_config, {"rrt"});
+        rrt_settings.load(rrt_doc);
+        if (!rrt_doc.ok() || rrt_settings.missing() != NULL) {
+            LOG_ERROR("[ctrl] %s is not usable (%s):\n%s", rrt_config.c_str(),
+                      rrt_settings.missing() != NULL ? rrt_settings.missing() : "see below",
+                      rrt_doc.report().c_str());
+            return -1;
+        }
+        rrt_settings.check_step_deg = p.max_joint_step_deg;
+    }
+
     LOG_INFO("[ctrl] config loaded: %s", config.c_str());
 
     ctrl::Node node(p, arm, jaws, limits, field_path);
+    if (!rrt_config.empty()) {
+        node.useRrt(rrt_settings);
+        LOG_WARN("[ctrl] RRT* trial on: move_q plans with RRT*%s (%s)",
+                 rrt_settings.standoff ? "" : ", no standoff",
+                 rrt_config.c_str());
+    }
     LOG_INFO("[ctrl] node started");
 
     // Run ROS callbacks and the control loop concurrently.

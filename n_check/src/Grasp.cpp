@@ -44,7 +44,7 @@ bool legClear(const kine::Geom &g,
             hit_floor = true;
             return false;
         }
-        if (f.ok() && firstBlocked(f, vol, true) >= 0) {
+        if (f.ok() && firstBlocked(f, vol, false) >= 0) {
             return false;
         }
     }
